@@ -1,0 +1,36 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Verify the app bundle
+        run: |
+          set -euo pipefail
+          BIN="build/Headroom.app/Contents/MacOS/Headroom"
+          test -x "$BIN"
+          test -f "build/Headroom.app/Contents/Info.plist"
+          # Must be a universal binary — a single-arch slice means the lipo step silently regressed.
+          lipo -info "$BIN" | tee /dev/stderr | grep -q "arm64"
+          lipo -info "$BIN" | grep -q "x86_64"
+
+      - name: Check nothing logs the token
+        run: |
+          set -euo pipefail
+          # Cheap guard against the one mistake that actually matters here. Flags any print/NSLog
+          # whose argument mentions a token or credential.
+          if grep -rnE '(print|NSLog|debugPrint|FileHandle\.standardError)[^\n]*[Tt]oken' Sources/; then
+            echo "::error::Source appears to log a token. See the guardrails in CLAUDE.md."
+            exit 1
+          fi
+          echo "OK — no token logging found."
