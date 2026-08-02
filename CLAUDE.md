@@ -35,7 +35,8 @@ There is no Xcode project. SwiftPM compiles the sources and `build.sh` wraps the
 | `Sources/HeadroomCore/Settings.swift` | UserDefaults-backed preferences; launch-at-login proxies `SMAppService` |
 | `Sources/HeadroomCore/Notifier.swift` | Threshold alerts, deduplicated per window per reset period |
 | `assets/Headroom.icon` | Icon Composer document — the icon's source of truth. Two gauge tracks, orange fills, cream gradient |
-| `assets/icon-1024.png` | Flattened export of the above, and the input to the `.icns` |
+| `assets/icon-1024.png` | A committed *render* of that document, and the only icon input on the CLT-only path |
+| `assets/render-icon.sh` | Regenerates the PNG from the document. Run it after editing the icon, commit both |
 
 Everything lives in `HeadroomCore` so the test target can reach it with `@testable`, keeping the
 public API to `AppDelegate` alone. `MenuController` renders `[LimitWindow]` and nothing else — that's
