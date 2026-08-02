@@ -78,7 +78,7 @@ Found in a pre-release code review, before first release:
   the menu was on screen, and a countdown would keep running toward a reset time that had already
   been replaced — reaching "now" and staying pinned there until the menu was closed and reopened.
 - **A model name reported by the server flowed unbounded into the menu, notifications and stored
-  preferences.** It is now trimmed, length-capped, and an empty one no longer renders "THIS WEEK ()".
+  preferences.** It is now trimmed, length-capped, and an empty one no longer renders a heading with empty brackets.
 - **The documented release procedure discarded its own notarization.** It rebuilt the app after
   signing and stapling, replacing both with an ad-hoc signature before packaging the DMG. `build.sh`
   gained `--dmg-only` for that step.
