@@ -11,7 +11,7 @@ jobs:
   release:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # `VERSION` in build.sh is what lands in CFBundleVersion / CFBundleShortVersionString, and
       # nothing ties it to the tag. Tagging v0.2.0 on a commit where build.sh still says 0.1.0

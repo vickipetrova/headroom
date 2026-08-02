@@ -9,7 +9,7 @@ jobs:
   build:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # --disable-xctest enforces the project's toolchain contract. The Command Line Tools ship
       # Testing.framework but not XCTest.framework, so an `import XCTest` would compile here (the
