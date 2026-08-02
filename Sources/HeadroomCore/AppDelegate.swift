@@ -1,5 +1,8 @@
+#if os(macOS)
 import AppKit
+#endif
 
+#if os(macOS)
 /// Wiring: a provider, a menu, and two timers.
 ///
 /// The only public symbol in HeadroomCore. `Sources/Headroom/main.swift` holds nothing but the
@@ -82,3 +85,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         return timer
     }
 }
+#endif
+
+#if !os(macOS)
+import Foundation
+
+/// Stub AppDelegate for non-macOS platforms to satisfy references without AppKit.
+public final class AppDelegate: NSObject {
+    public override init() { super.init() }
+}
+#endif

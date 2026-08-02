@@ -16,6 +16,23 @@ enum Settings {
     private enum Key {
         static let refreshMinutes = "refreshMinutes"
         static let notifyThreshold = "notifyThreshold"
+        static let titleFormat = "titleFormat"
+    }
+
+    enum TitleFormat: Int, CaseIterable {
+        case both = 0
+        case sessionOnly = 1
+        case weeklyOnly = 2
+        case highest = 3
+
+        var title: String {
+            switch self {
+            case .both: return "Session and Weekly"
+            case .sessionOnly: return "Session Only"
+            case .weeklyOnly: return "Weekly Only"
+            case .highest: return "Highest Usage"
+            }
+        }
     }
 
     /// Values outside the offered set fall back to the default, so a hand-edited plist can't
@@ -37,6 +54,15 @@ enum Settings {
             return thresholdOptions.contains(stored) ? stored : 80
         }
         set { defaults.set(newValue, forKey: Key.notifyThreshold) }
+    }
+
+    static var titleFormat: TitleFormat {
+        get {
+            guard defaults.object(forKey: Key.titleFormat) != nil else { return .both }
+            let stored = defaults.integer(forKey: Key.titleFormat)
+            return TitleFormat(rawValue: stored) ?? .both
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.titleFormat) }
     }
 
     /// Deliberately not mirrored into UserDefaults: macOS owns this state (the user can revoke it

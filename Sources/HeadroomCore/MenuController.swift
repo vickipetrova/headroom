@@ -110,11 +110,31 @@ final class MenuController: NSObject, NSMenuDelegate {
             .foregroundColor: Fmt.spark,
             .font: NSFont.systemFont(ofSize: 13),
         ]))
-        title.append(percentage(of: windows.first { $0.kind == .session }))
-        title.append(NSAttributedString(string: " · ", attributes: [
-            .foregroundColor: NSColor.secondaryLabelColor,
-        ]))
-        title.append(percentage(of: windows.first { $0.kind == .weekly }))
+        
+        let session = windows.first { $0.kind == .session }
+        let weekly = windows.first { $0.kind == .weekly }
+        
+        switch Settings.titleFormat {
+        case .both:
+            title.append(percentage(of: session))
+            title.append(NSAttributedString(string: " · ", attributes: [
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]))
+            title.append(percentage(of: weekly))
+        case .sessionOnly:
+            title.append(percentage(of: session))
+        case .weeklyOnly:
+            title.append(percentage(of: weekly))
+        case .highest:
+            let sessionUtil = session?.utilization ?? 0
+            let weeklyUtil = weekly?.utilization ?? 0
+            if sessionUtil >= weeklyUtil {
+                title.append(percentage(of: session))
+            } else {
+                title.append(percentage(of: weekly))
+            }
+        }
+        
         button.attributedTitle = title
     }
 
@@ -212,6 +232,15 @@ final class MenuController: NSObject, NSMenuDelegate {
         }
 
         submenu.addItem(.separator())
+        submenu.addItem(header("MENU BAR FORMAT"))
+        for format in Settings.TitleFormat.allCases {
+            let item = action(format.title, key: "", selector: #selector(setTitleFormat(_:)))
+            item.tag = format.rawValue
+            item.state = Settings.titleFormat == format ? .on : .off
+            submenu.addItem(item)
+        }
+
+        submenu.addItem(.separator())
         let launch = action("Launch at Login", key: "", selector: #selector(toggleLaunchAtLogin))
         launch.state = Settings.launchAtLogin ? .on : .off
         submenu.addItem(launch)
@@ -234,6 +263,12 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     @objc private func toggleLaunchAtLogin() {
         Settings.launchAtLogin.toggle()
+    }
+
+    @objc private func setTitleFormat(_ sender: NSMenuItem) {
+        guard let format = Settings.TitleFormat(rawValue: sender.tag) else { return }
+        Settings.titleFormat = format
+        renderTitle()
     }
 
     // MARK: - Live rows
