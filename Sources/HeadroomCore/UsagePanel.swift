@@ -9,25 +9,6 @@ import SwiftUI
 // render at full strength while `NSMenu` still provides the material background, the dismissal
 // behaviour, and key equivalents for the real commands below them.
 
-/// Which limits the menu bar title shows, given what the response reported and what the user picked.
-///
-/// Pure and separate from `MenuController` so the rules are testable — the controller can't be
-/// constructed in a test, and these are exactly the cases that are awkward to reach by hand: a
-/// scope that disappears from the response, or every chosen scope disappearing at once.
-enum TitleSelection {
-    static func windows(from windows: [LimitWindow], selection: Set<String>) -> [LimitWindow] {
-        // Filtering rather than looking each selected id up: order comes from the response, which
-        // `ClaudeProvider.windows(in:)` already fixes as session, then weekly, then scoped. A
-        // selection whose scope has vanished simply doesn't match, and the stored preference is
-        // untouched, so it renders again if the scope returns.
-        let shown = windows.filter { selection.contains($0.id) }
-        guard shown.isEmpty else { return shown }
-        // Everything chosen has gone missing. One number beats a bare spark, which reads as broken
-        // and offers no route back to the setting.
-        return windows.first { $0.kind == .session }.map { [$0] } ?? Array(windows.prefix(1))
-    }
-}
-
 /// Everything one usage section displays, derived from a `LimitWindow`.
 ///
 /// Pure, so the formatting and the bar arithmetic are unit-testable without standing up any AppKit
@@ -54,9 +35,10 @@ struct UsageRow {
     /// two can't drift into describing the same row differently.
     var spoken: String { "\(header), \(value) used, \(trailing)" }
 
-    init(_ window: LimitWindow,
-         now: Date = Date(),
-         mode: Settings.ColorMode = Settings.colorMode) {
+    /// `mode` has no default on purpose. It used to default to `Settings.colorMode`, which made the
+    /// type read a global while its own doc claimed purity — and because Swift evaluates default
+    /// arguments at the call site, passing it explicitly changed nothing. Callers name it now.
+    init(_ window: LimitWindow, now: Date = Date(), mode: Settings.ColorMode) {
         barColor = Fmt.color(window.utilization, mode: mode, role: .bar)
         header = window.label
         headerTrailing = window.resetsAt.map { Fmt.clock($0, from: now) } ?? ""

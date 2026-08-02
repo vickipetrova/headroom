@@ -72,7 +72,7 @@ struct DefaultsBacked {
 
         private func window(_ utilization: Double, id: String = "session",
                             resetsAt: Date?) -> LimitWindow {
-            LimitWindow(kind: .session, id: id, label: "SESSION · 5-HOUR", shortLabel: "Session", modelName: nil,
+            LimitWindow(kind: .session, id: id, label: "SESSION · 5-HOUR", shortLabel: "Session", optionLabel: "opt",
                         utilization: utilization, resetsAt: resetsAt)
         }
 
@@ -159,7 +159,7 @@ struct DefaultsBacked {
             Settings.notifyThreshold = 80
             Notifier.evaluate([window(85, resetsAt: reset)], now: now)
             let restyled = LimitWindow(kind: .session, id: "session",
-                                       label: "COMPLETELY DIFFERENT HEADING", shortLabel: "Session", modelName: nil,
+                                       label: "COMPLETELY DIFFERENT HEADING", shortLabel: "Session", optionLabel: "opt",
                                        utilization: 85, resetsAt: reset)
             Notifier.evaluate([restyled], now: now)
             #expect(recorder.count == 1)
@@ -348,12 +348,13 @@ struct DefaultsBacked {
             #expect(Settings.titleLimitIDs == [LimitWindow.sessionID])
         }
 
-        /// A scope that disappears from the response keeps its preference, so it comes back selected
-        /// rather than silently reset.
-        @Test func aVanishedScopeKeepsItsPreference() {
-            Settings.titleLimitIDs = [LimitWindow.sessionID, "scoped:Fable"]
-            // …a week of responses without Fable changes nothing here; only the user does.
-            #expect(Settings.titleLimitIDs.contains("scoped:Fable"))
+        /// A stored value of the wrong shape entirely — a hand-edited plist, or a format change in a
+        /// later version — falls back rather than crashing on the cast.
+        @Test func aWronglyTypedStoredSelectionFallsBack() {
+            defaults.set("session", forKey: "titleLimitIDs")
+            #expect(Settings.titleLimitIDs == Settings.defaultTitleLimitIDs)
+            defaults.set([1, 2], forKey: "titleLimitIDs")
+            #expect(Settings.titleLimitIDs == Settings.defaultTitleLimitIDs)
         }
 
         // `Settings.launchAtLogin` is deliberately never touched: its setter registers a real login

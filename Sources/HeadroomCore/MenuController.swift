@@ -1,5 +1,24 @@
 import AppKit
 
+/// Which limits the menu bar title shows, given what the response reported and what the user picked.
+///
+/// Pure and separate from `MenuController` so the rules are testable — the controller can't be
+/// constructed in a test, and these are exactly the cases that are awkward to reach by hand: a
+/// scope that disappears from the response, or every chosen scope disappearing at once.
+enum TitleSelection {
+    static func windows(from windows: [LimitWindow], selection: Set<String>) -> [LimitWindow] {
+        // Filtering rather than looking each selected id up: order comes from the response, which
+        // `ClaudeProvider.windows(in:)` already fixes as session, then weekly, then scoped. A
+        // selection whose scope has vanished simply doesn't match, and the stored preference is
+        // untouched, so it renders again if the scope returns.
+        let shown = windows.filter { selection.contains($0.id) }
+        guard shown.isEmpty else { return shown }
+        // Everything chosen has gone missing. One number beats a bare spark, which reads as broken
+        // and offers no route back to the setting.
+        return windows.first { $0.kind == .session }.map { [$0] } ?? Array(windows.prefix(1))
+    }
+}
+
 /// Owns the status item: the title in the menu bar and the dropdown behind it.
 ///
 /// Knows nothing about where usage comes from — it is handed `[LimitWindow]` and renders it.
@@ -235,13 +254,20 @@ final class MenuController: NSObject, NSMenuDelegate {
             submenu.addItem(.separator())
             submenu.addItem(header("SHOW IN MENU BAR"))
             let selected = Settings.titleLimitIDs
+            // What the title is *actually* showing, which differs from the selection when every
+            // chosen scope has vanished and `TitleSelection` fell back. Marking that row `.mixed`
+            // rather than `.off` stops the submenu claiming a limit is hidden while its number is
+            // sitting in the menu bar.
+            let rendered = Set(TitleSelection.windows(from: windows, selection: selected).map(\.id))
             for window in windows {
-                let item = action(titleOptionLabel(for: window),
+                let item = action(window.optionLabel,
                                   key: "", selector: #selector(toggleTitleLimit(_:)))
                 // The id goes in `representedObject`, not `tag`: tags are Int and these are strings,
                 // and a positional tag would break the moment the response reorders.
                 item.representedObject = window.id
-                item.state = selected.contains(window.id) ? .on : .off
+                if selected.contains(window.id) { item.state = .on }
+                else if rendered.contains(window.id) { item.state = .mixed }
+                else { item.state = .off }
                 submenu.addItem(item)
             }
         }
@@ -274,17 +300,6 @@ final class MenuController: NSObject, NSMenuDelegate {
     @objc private func setThreshold(_ sender: NSMenuItem) {
         Settings.notifyThreshold = sender.tag
         onSettingsChanged?()
-    }
-
-    /// How a limit is offered in the Show in Menu Bar list. Scoped windows are named by their model,
-    /// which comes from the response — this is the one place the vendor's naming shows up in a
-    /// setting, and it is never hardcoded.
-    private func titleOptionLabel(for window: LimitWindow) -> String {
-        switch window.kind {
-        case .session: return "Session (5h)"
-        case .weekly: return "Weekly (all models)"
-        case .weeklyScoped: return window.modelName ?? "Model-specific"
-        }
     }
 
     @objc private func toggleTitleLimit(_ sender: NSMenuItem) {
