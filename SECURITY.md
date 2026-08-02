@@ -38,9 +38,16 @@ starts returning one.
 
 In `UserDefaults` (`com.vickipetrova.headroom`) only:
 
-- your refresh interval and alert threshold
+- your four preferences: refresh interval, alert threshold, colour mode, and which limits you chose
+  to show in the menu bar title
 - one marker per limit window, recording which reset period was already alerted on and at what
   threshold, so you don't get the same alert twice
+
+Both of those involve limit identifiers, and for a per-model weekly limit the identifier contains the
+model's display name exactly as the API reported it. Your menu bar choices store them as values
+(`scoped:Opus`); each alert marker puts one in its key (`notified.scoped:Opus`). So the model names
+your plan reports do reach disk. That is the whole extent of it: no percentages, no reset times, no
+history of your usage, and nothing that identifies your account.
 
 Launch at Login is stored by macOS, not by Headroom. No credentials, no usage history, no logs.
 

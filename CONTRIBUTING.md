@@ -22,9 +22,15 @@ Build from the latest `main` so you're not fixing something that already changed
 ## What's welcome
 
 Bug fixes. Compatibility fixes across macOS versions and architectures. Better handling when the
-usage endpoint drifts. Anything on the [Roadmap](README.md#roadmap) — those are filed as
-`good first issue` and are genuinely up for grabs, especially additional providers behind the
-existing `UsageProvider` protocol.
+usage endpoint drifts. Anything on the [Roadmap](README.md#roadmap) — every item there is an open
+issue and genuinely up for grabs.
+
+Two labels, and the difference is real rather than decorative. **`good first issue`** means the shape
+is settled and it's a matter of writing the code. **`help wanted`** means there's a design decision to
+agree in the issue first — a second provider needs somewhere for two accounts' numbers to go in one
+menu bar title, and reading Claude Code's statusline needs a helper process and a write to the user's
+`~/.claude/settings.json`. Both are welcome; just don't spend a weekend on either before we've talked
+about the shape.
 
 ## What won't be merged
 
@@ -97,7 +103,8 @@ that's why.
 ## Conduct
 
 Be decent. Critique code, not people; assume the other person is trying to help. That's the whole
-policy.
+policy, and [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) is the long form of it, including how to
+report a problem privately.
 
 ## License
 
