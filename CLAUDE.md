@@ -124,6 +124,15 @@ the system appearance — a forced-appearance probe will render light regardless
 Section headings inside the *Settings submenu* are deliberately still plain dimmed items: a greyed
 heading is the conventional look inside a menu, and the rows it labels are commands, not data.
 
+**Commands stay plain `NSMenuItem`s**, and this is not a style preference — two things were measured
+on a view-backed version of Refresh Now. A hosting view swallows the mouse event, so
+`NSMenuItem.action` never fires and the row has to reimplement its own selection and dismissal. And
+`keyEquivalent` stops working outright: ⌘Q on a plain item kept working while ⌘R on the view-backed
+row did nothing, and `NSMenuDelegate.menuHasKeyEquivalent` — the documented hook for reclaiming it —
+is not consulted for status-item menus. A custom command row costs the shortcut, the native
+highlight, and AppKit's click routing; that is why Refresh Now shows its age as plain text rather
+than as a badge.
+
 ## The open dropdown
 
 `rebuild()` refuses to run while the menu is open, and rows are updated in place instead through

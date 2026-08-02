@@ -60,6 +60,21 @@ enum Fmt {
         return formatter.string(from: date)
     }
 
+    /// How long ago the numbers on screen were fetched: "just now", "5m ago", "2h ago".
+    ///
+    /// Deliberately vaguer than a clock time. Next to a Refresh command the useful question is "are
+    /// these stale?", and "4m ago" answers it without the reader having to subtract.
+    static func age(of date: Date?, from now: Date = Date()) -> String {
+        guard let date else { return "never" }
+        let seconds = Int(now.timeIntervalSince(date))
+        if seconds < 45 { return "just now" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(max(minutes, 1))m ago" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours)h ago" }
+        return "\(hours / 24)d ago"
+    }
+
     /// The one place this sentence is written. It used to exist separately in the dropdown and in
     /// notification bodies, and the two had already drifted — one carried a trailing full stop.
     static func resetLine(for date: Date?, from now: Date = Date()) -> String {

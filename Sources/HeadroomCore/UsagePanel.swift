@@ -102,7 +102,7 @@ private struct ProgressBar: View {
     }
 }
 
-/// The footer, and every message-only state: "Updated 16:04", an error, "Loading…".
+/// The footer, and every message-only state: an error, "Loading…".
 struct PanelTextView: View {
     let text: String
 

@@ -170,8 +170,10 @@ final class MenuController: NSObject, NSMenuDelegate {
                 if index > 0 { menu.addItem(.separator()) }
                 menu.addItem(usageRow(for: window))
             }
-            menu.addItem(.separator())
-            menu.addItem(footerRow())
+            if lastError != nil {
+                menu.addItem(.separator())
+                menu.addItem(errorRow())
+            }
         }
 
         if Settings.notifyThreshold > 0, Notifier.alertsBlocked {
@@ -182,7 +184,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        menu.addItem(action("Refresh Now", key: "r", selector: #selector(refreshClicked)))
+        menu.addItem(refreshRow())
         menu.addItem(settingsItem())
         menu.addItem(action("Quit Headroom", key: "q", selector: #selector(quitClicked)))
     }
@@ -271,19 +273,32 @@ final class MenuController: NSObject, NSMenuDelegate {
         return item
     }
 
-    /// One row for two states. The error copy already carries the timestamp ("Showing data from
-    /// 14:02"), so an Updated row beside it would say the same thing twice.
-    ///
-    /// Only built in the branch where `windows` is non-empty, which is also the only way
-    /// `lastUpdated` is set — so in practice one of the two branches below always has something to
-    /// say, and the empty fallback is unreachable rather than a blank row anyone can see.
-    private func footerRow() -> NSMenuItem {
+    /// Errors only. How fresh the numbers are is shown on the Refresh Now row instead, where it sits
+    /// next to the thing that acts on it — and the error copy already carries its own timestamp
+    /// ("Showing data from 14:02"), so a separate Updated line would have said it twice.
+    private func errorRow() -> NSMenuItem {
         textRow { [weak self] in
-            guard let self else { return nil }
-            if let lastError { return message(for: lastError) }
-            if let lastUpdated { return "Updated \(Fmt.clock(lastUpdated))" }
-            return nil
+            guard let self, let lastError = self.lastError else { return nil }
+            return self.message(for: lastError)
         }
+    }
+
+    /// Refresh Now, carrying how old the numbers are.
+    ///
+    /// A plain `NSMenuItem`, deliberately, even though a view-backed one could draw a nicer badge.
+    /// Two things measured on a view-backed version decided it: a hosting view swallows the mouse
+    /// event, so `NSMenuItem.action` never fires and the row has to reimplement its own selection;
+    /// and `keyEquivalent` stops working entirely — ⌘Q on a plain item kept working while ⌘R on the
+    /// view-backed row did nothing, and `NSMenuDelegate.menuHasKeyEquivalent`, the documented hook
+    /// for reclaiming it, is not consulted for status-item menus. Plain text costs a rounded badge;
+    /// a custom view costs the shortcut, the native highlight, and AppKit's click routing.
+    ///
+    /// Registered as a live row so the age keeps counting up while the menu is held open.
+    private func refreshRow() -> NSMenuItem {
+        let title = { [weak self] in "Refresh Now — updated \(Fmt.age(of: self?.lastUpdated))" }
+        let item = action(title(), key: "r", selector: #selector(refreshClicked))
+        liveRows.append(LiveRow { item.title = title() })
+        return item
     }
 
     /// The window this row was built for, as it stands in the *latest* poll.
