@@ -59,6 +59,9 @@ Found in a pre-release code review, before first release:
 - **The bearer token could have followed a redirect to another host.** The connection now refuses
   redirects outright, so "one network destination" is enforced rather than merely documented.
 - **A slow refresh could overwrite newer data with older**, timestamped as if it were current.
+- **Numbers froze in a dropdown left open.** Percentages and the "Updated" line never changed while
+  the menu was on screen, and a countdown would keep running toward a reset time that had already
+  been replaced — reaching "now" and staying pinned there until the menu was closed and reopened.
 - **A model name reported by the server flowed unbounded into the menu, notifications and stored
   preferences.** It is now trimmed, length-capped, and an empty one no longer renders "THIS WEEK ()".
 - **The documented release procedure discarded its own notarization.** It rebuilt the app after

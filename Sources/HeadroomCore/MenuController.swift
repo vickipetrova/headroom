@@ -18,9 +18,17 @@ final class MenuController: NSObject, NSMenuDelegate {
     private var lastError: Error?
     private var isMenuOpen = false
 
-    /// Rows whose text contains a countdown, so they can be refreshed in place while the menu
-    /// sits open. Rebuilt with the menu.
-    private var countdownRows: [(item: NSMenuItem, text: () -> String)] = []
+    /// A row that can be rewritten in place while the menu sits open, so a menu held across a tick
+    /// or a poll stays honest without being rebuilt underneath the user.
+    ///
+    /// `text` reads *current* state each time it is called rather than closing over a value — see
+    /// `window(labelled:)`. It returns nil for "leave this row's text alone", which is what a row
+    /// whose window has vanished from the latest poll does: one-poll-stale beats blanking the row
+    /// or writing some other window's number into it.
+    private struct LiveRow { let item: NSMenuItem; let text: () -> String? }
+
+    /// Rebuilt with the menu, and cleared before it — these hold strong references to `NSMenuItem`s.
+    private var liveRows: [LiveRow] = []
 
     override init() {
         super.init()
@@ -37,6 +45,10 @@ final class MenuController: NSObject, NSMenuDelegate {
         self.lastUpdated = updatedAt
         self.lastError = nil
         renderTitle()
+        // A poll can land while the dropdown is open, and the open dropdown is not rebuilt. Without
+        // this the rows keep rendering the state they were built from — most visibly a countdown
+        // running down to the *previous* window's reset and pinning at "now".
+        refreshLiveRows()
     }
 
     /// Keeps whatever was last shown. A dead network or an expired token shouldn't blank out
@@ -44,12 +56,38 @@ final class MenuController: NSObject, NSMenuDelegate {
     func update(error: Error) {
         self.lastError = error
         renderTitle()
+        // Same reason as above, and it is the footer that changes: "Updated 14:02" has to become
+        // the error line while the menu is on screen, or the menu claims a refresh that failed.
+        refreshLiveRows()
     }
 
-    /// Refreshes countdowns without rebuilding the menu, for the case where it's held open.
-    func tick() {
+    /// Refreshes the live rows without rebuilding the menu, for the case where it's held open.
+    func tick() { refreshLiveRows() }
+
+    // MARK: - In-place refresh
+    //
+    // Every live row recomputes together, from all three entry points (tick, poll, poll failure), so
+    // the menu can never show a mix of fresh and stale values — a percentage from one poll above a
+    // reset time from the one before it is worse than either alone.
+    //
+    // Accepted limit, and a deliberate one: this rewrites rows, it cannot add or remove them. If a
+    // poll changes the menu's *shape* — a `weekly_scoped` model appears or disappears, the first
+    // successful poll replaces "Loading…" — the new shape waits for the next open, because the
+    // alternative is rebuilding a menu that is on screen (see `rebuild`). The menu bar title, which
+    // is what the user reads without clicking, is correct the whole time.
+
+    private func refreshLiveRows() {
         guard isMenuOpen else { return }  // Closed menus rebuild from scratch on the way open.
-        for row in countdownRows { row.item.title = row.text() }
+        // Hazard: `NSMenuItem.attributedTitle` takes precedence over `title`, silently and with no
+        // compiler complaint if both are set. This works today only because `header(_:)` is the sole
+        // builder that sets `attributedTitle` and every live row comes from `row(_:)`, which sets
+        // `title`. Colourizing a percentage row with `Fmt.color`, as the menu bar title does, would
+        // turn every assignment below into a no-op; such a row has to be refreshed by re-setting its
+        // attributed string instead.
+        for row in liveRows {
+            guard let text = row.text() else { continue }
+            row.item.title = text
+        }
     }
 
     // MARK: - Menu bar title
@@ -95,8 +133,21 @@ final class MenuController: NSObject, NSMenuDelegate {
     func menuDidClose(_ menu: NSMenu) { isMenuOpen = false }
 
     private func rebuild() {
+        // Never rebuild a menu that is on screen. `menuNeedsUpdate` is not just an "about to open"
+        // callback: AppKit also runs it while matching key equivalents, and this menu claims ⌘R and
+        // ⌘Q, so it can fire mid-tracking. Rebuilding then would (1) delete the parent item of an
+        // open Settings submenu out from under it, (2) re-target a click already in flight — the
+        // user presses on "Refresh Now" and releases on whatever now occupies that row, which at the
+        // bottom of this menu is "Quit Headroom" — and (3) discard highlight and keyboard-navigation
+        // state, dropping the user back to the top of the menu mid-arrow-key. Open menus are updated
+        // in place by `refreshLiveRows` instead.
+        guard !isMenuOpen else { return }
+
+        // Before the items go, not after: these registrations hold the `NSMenuItem`s strongly, so a
+        // stale entry would keep a detached item alive and go on ticking it forever for a menu that
+        // no longer contains it.
+        liveRows.removeAll()
         menu.removeAllItems()
-        countdownRows.removeAll()
 
         if windows.isEmpty {
             if let lastError {
@@ -112,17 +163,11 @@ final class MenuController: NSObject, NSMenuDelegate {
             for (index, window) in windows.enumerated() {
                 if index > 0 { menu.addItem(.separator()) }
                 menu.addItem(header(window.label))
-                menu.addItem(row("\(Fmt.pct(window.utilization)) used"))
-                menu.addItem(countdownRow(for: window))
+                menu.addItem(percentRow(for: window))
+                menu.addItem(resetRow(for: window))
             }
             menu.addItem(.separator())
-            // The error line already carries the timestamp ("Showing data from 14:02"), so an
-            // Updated row alongside it would say the same thing twice.
-            if let lastError {
-                menu.addItem(row(message(for: lastError)))
-            } else if let lastUpdated {
-                menu.addItem(row("Updated \(Fmt.clock(lastUpdated))"))
-            }
+            menu.addItem(footerRow())
         }
 
         if Settings.notifyThreshold > 0, Notifier.alertsBlocked {
@@ -191,14 +236,60 @@ final class MenuController: NSObject, NSMenuDelegate {
         Settings.launchAtLogin.toggle()
     }
 
-    private func countdownRow(for window: LimitWindow) -> NSMenuItem {
-        let text = {
-            guard window.resetsAt != nil else { return "Reset time unknown" }
-            return "Resets \(Fmt.clock(window.resetsAt)) — in \(Fmt.countdown(to: window.resetsAt))"
-        }
-        let item = row(text())
-        countdownRows.append((item, text))
+    // MARK: - Live rows
+
+    /// Builds a disabled row and registers it for in-place refresh. `text` is the row's contents at
+    /// *any* moment, not just this one: it runs here to seed the item, and again on every tick and
+    /// every poll.
+    private func liveRow(_ text: @escaping () -> String?) -> NSMenuItem {
+        let item = row(text() ?? "")
+        liveRows.append(LiveRow(item: item, text: text))
         return item
+    }
+
+    private func percentRow(for window: LimitWindow) -> NSMenuItem {
+        let label = window.label
+        return liveRow { [weak self] in
+            guard let window = self?.window(labelled: label) else { return nil }
+            return "\(Fmt.pct(window.utilization)) used"
+        }
+    }
+
+    private func resetRow(for window: LimitWindow) -> NSMenuItem {
+        let label = window.label
+        return liveRow { [weak self] in
+            guard let window = self?.window(labelled: label) else { return nil }
+            return Fmt.resetLine(for: window.resetsAt)
+        }
+    }
+
+    /// One row for two states. The error copy already carries the timestamp ("Showing data from
+    /// 14:02"), so an Updated row beside it would say the same thing twice.
+    ///
+    /// Only built in the branch where `windows` is non-empty, which is also the only way
+    /// `lastUpdated` is set — so in practice one of the two branches below always has something to
+    /// say, and the empty fallback is unreachable rather than a blank row anyone can see.
+    private func footerRow() -> NSMenuItem {
+        liveRow { [weak self] in
+            guard let self else { return nil }
+            if let lastError { return message(for: lastError) }
+            if let lastUpdated { return "Updated \(Fmt.clock(lastUpdated))" }
+            return nil
+        }
+    }
+
+    /// The window this row was built for, as it stands in the *latest* poll.
+    ///
+    /// Looking it up beats closing over the `LimitWindow`: a captured value made a held-open menu go
+    /// on counting down to the reset of a window the poll had already replaced, reach "now", and
+    /// stay pinned there until the menu was closed and reopened.
+    ///
+    /// `label` is the identity, matching `Notifier.markerKey(for:)`, which keys its
+    /// already-announced markers on exactly the same string — including the vendor-supplied model
+    /// name that distinguishes two scoped weekly windows. Two windows sharing a label would have to
+    /// be the same window for that dedupe to be correct, so it is the right key here too.
+    private func window(labelled label: String) -> LimitWindow? {
+        windows.first { $0.label == label }
     }
 
     /// The plan's error copy, plus the "you're looking at old numbers" note that only makes sense

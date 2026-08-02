@@ -92,6 +92,30 @@ that traps on infinity or anything past `Int`'s range. `scope.model.display_name
 and lands in a menu label, a notification title *and* a `UserDefaults` key, so it is trimmed,
 flattened, length-capped, and rejected when empty.
 
+## The open dropdown
+
+`rebuild()` refuses to run while the menu is open, and rows are updated in place instead through
+`liveRows`. Three reasons rebuilding mid-tracking is wrong: it can delete the parent of an open
+Settings submenu, it re-targets a click already in flight (aim at "Refresh Now", hit "Quit
+Headroom"), and it destroys highlight and keyboard state. `menuNeedsUpdate` also fires during ⌘R/⌘Q
+key-equivalent matching, so this is reachable without the menu ever being clicked.
+
+Live rows close over the window's **label** and look it up in current state, never over a
+`LimitWindow` value. Capturing the value made a held-open menu keep counting down to a reset the poll
+had already replaced, reach "now", and stay pinned there until the menu was reopened.
+
+Measured, not assumed: an open `NSMenu` **does re-layout** when a row's text grows — it does not clip
+to its open-time width. A held-open menu was observed resizing 253 → 293 → 640 points mid-tracking
+(gaining a weekday at the 24h threshold, then an error footer), growing leftward to keep its right
+edge anchored, and landing on exactly the width a from-scratch rebuild produces. So don't reserve or
+pad widths. The real limit is *row count*: in-place updates can't add or remove rows, so a window
+appearing or disappearing waits for the next open. The menu bar title stays correct meanwhile.
+
+One trap when checking this by hand: querying menu item names over `osascript` on a **closed** menu
+triggers `menuNeedsUpdate` and therefore a rebuild, so it reports fresh text whether or not in-place
+refresh works. It only proves something about live updates when paired with evidence the menu is
+actually tracking.
+
 ## Credentials
 
 Two stores, and choosing between them on *presence* was a real bug: a stale
