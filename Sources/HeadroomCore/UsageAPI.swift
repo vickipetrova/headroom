@@ -16,6 +16,10 @@ struct LimitWindow: Equatable {
         case weeklyScoped
     }
 
+    static let sessionID = "session"
+    static let weeklyID = "weekly"
+    static func scopedID(model: String) -> String { "scoped:\(model)" }
+
     let kind: Kind
 
     /// Stable identity — `"session"`, `"weekly"`, `"scoped:Opus"` — and the only thing that should
@@ -31,6 +35,11 @@ struct LimitWindow: Equatable {
     let label: String
     /// Sentence-case form for notifications, e.g. "This week".
     let shortLabel: String
+
+    /// The model this window is scoped to, as the provider named it — nil for the two headline
+    /// windows. Carried rather than parsed back out of `id`, so the menu can offer "Fable" as a
+    /// choice without picking the string apart.
+    let modelName: String?
     /// Percent of the window consumed, 0–100.
     let utilization: Double
     let resetsAt: Date?
@@ -229,6 +238,7 @@ struct ClaudeProvider: UsageProvider {
             guard count > 1 else { return window }
             return LimitWindow(kind: window.kind, id: "\(window.id)#\(count)",
                                label: window.label, shortLabel: window.shortLabel,
+                               modelName: window.modelName,
                                utilization: window.utilization, resetsAt: window.resetsAt)
         }
     }
@@ -237,22 +247,23 @@ struct ClaudeProvider: UsageProvider {
     // how they label the same window.
 
     private static func sessionWindow(utilization: Double, resetsAt: Date?) -> LimitWindow {
-        LimitWindow(kind: .session, id: "session",
-                    label: "SESSION · 5-HOUR", shortLabel: "Session",
+        LimitWindow(kind: .session, id: LimitWindow.sessionID,
+                    label: "SESSION · 5-HOUR", shortLabel: "Session", modelName: nil,
                     utilization: utilization, resetsAt: resetsAt)
     }
 
     private static func weeklyWindow(utilization: Double, resetsAt: Date?) -> LimitWindow {
-        LimitWindow(kind: .weekly, id: "weekly",
-                    label: "THIS WEEK · ALL MODELS", shortLabel: "This week",
+        LimitWindow(kind: .weekly, id: LimitWindow.weeklyID,
+                    label: "THIS WEEK · ALL MODELS", shortLabel: "This week", modelName: nil,
                     utilization: utilization, resetsAt: resetsAt)
     }
 
     private static func scopedWindow(model: String, utilization: Double,
                                      resetsAt: Date?) -> LimitWindow {
-        LimitWindow(kind: .weeklyScoped, id: "scoped:\(model)",
+        LimitWindow(kind: .weeklyScoped, id: LimitWindow.scopedID(model: model),
                     label: "THIS WEEK · \(model.uppercased())",
                     shortLabel: "This week (\(model))",
+                    modelName: model,
                     utilization: utilization, resetsAt: resetsAt)
     }
 

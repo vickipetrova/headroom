@@ -91,8 +91,14 @@ Everything lives in the dropdown under **Settings**:
 |---|---|---|
 | Refresh every | 1 / 5 / 15 minutes | 5 minutes |
 | Notify above | Off / 50% / 80% / 90% | 80% |
+| Show in Menu Bar | any combination of the limits your plan reports | Session + Weekly |
 | Colors | Alerts only / System | Alerts only |
 | Launch at Login | on / off | off |
+
+**Show in Menu Bar** picks which numbers appear in the title. The list is built from whatever the
+API currently reports, so a per-model limit shows up by name once your plan has one. Choices are
+stored against each limit's identifier rather than its name, so a limit that disappears for a while
+comes back selected rather than silently reset — and at least one always stays on.
 
 **Colors** decides how much the menu bar and the panel use colour. *Alerts only* keeps the spark
 orange and everything else in the ordinary label colour until usage is worth noticing, then turns

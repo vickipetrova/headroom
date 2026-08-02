@@ -11,7 +11,7 @@ import Testing
     private let now = Date(timeIntervalSince1970: 1_785_600_000)
 
     private func window(_ utilization: Double, resetsIn seconds: TimeInterval?) -> LimitWindow {
-        LimitWindow(kind: .session, id: "session", label: "SESSION · 5-HOUR", shortLabel: "Session",
+        LimitWindow(kind: .session, id: "session", label: "SESSION · 5-HOUR", shortLabel: "Session", modelName: nil,
                     utilization: utilization,
                     resetsAt: seconds.map { now.addingTimeInterval($0) })
     }
@@ -66,7 +66,7 @@ import Testing
 
     @Test func headingComesStraightFromTheWindowLabel() {
         let scoped = LimitWindow(kind: .weeklyScoped, id: "scoped:Fable",
-                                 label: "THIS WEEK · FABLE", shortLabel: "This week (Fable)",
+                                 label: "THIS WEEK · FABLE", shortLabel: "This week (Fable)", modelName: nil,
                                  utilization: 16, resetsAt: now.addingTimeInterval(3_600))
         #expect(UsageRow(scoped, now: now).header == "THIS WEEK · FABLE")
     }
@@ -91,5 +91,58 @@ import Testing
         #expect(spoken.contains("SESSION · 5-HOUR"))
         #expect(spoken.contains("5%"))
         #expect(spoken.contains("resets in 4h 15m"))
+    }
+}
+
+/// Which limits the menu bar title renders. Separate suite because these are the rules that are
+/// awkward to reach by hand — a scope vanishing from the response, or all of them vanishing at once.
+@Suite struct TitleSelectionTests {
+    private func window(_ kind: LimitWindow.Kind, _ id: String) -> LimitWindow {
+        LimitWindow(kind: kind, id: id, label: id, shortLabel: id, modelName: nil,
+                    utilization: 10, resetsAt: nil)
+    }
+
+    private var all: [LimitWindow] {
+        [window(.session, LimitWindow.sessionID),
+         window(.weekly, LimitWindow.weeklyID),
+         window(.weeklyScoped, "scoped:Fable")]
+    }
+
+    @Test func rendersOnlyTheSelectedLimits() {
+        let shown = TitleSelection.windows(from: all, selection: [LimitWindow.sessionID])
+        #expect(shown.map(\.id) == [LimitWindow.sessionID])
+    }
+
+    /// Order comes from the response, not from the order the user ticked boxes in.
+    @Test func keepsResponseOrderRegardlessOfSelection() {
+        let shown = TitleSelection.windows(
+            from: all, selection: ["scoped:Fable", LimitWindow.sessionID, LimitWindow.weeklyID])
+        #expect(shown.map(\.id) == [LimitWindow.sessionID, LimitWindow.weeklyID, "scoped:Fable"])
+    }
+
+    /// A scope the user picked that the response no longer reports is simply not rendered — no gap,
+    /// no placeholder, and the stored preference is left alone elsewhere so it returns if it does.
+    @Test func aVanishedScopeIsDroppedFromTheTitle() {
+        let shown = TitleSelection.windows(
+            from: all, selection: [LimitWindow.sessionID, "scoped:GoneAway"])
+        #expect(shown.map(\.id) == [LimitWindow.sessionID])
+    }
+
+    /// Every selection missing must not render an empty title — a bare spark reads as broken and
+    /// gives no route back to the setting that caused it.
+    @Test func everySelectionMissingFallsBackToSession() {
+        let shown = TitleSelection.windows(from: all, selection: ["scoped:GoneAway", "alsoGone"])
+        #expect(shown.map(\.id) == [LimitWindow.sessionID])
+    }
+
+    /// …and if even the session window is absent, show whatever came first rather than nothing.
+    @Test func withoutASessionWindowItFallsBackToTheFirstReported() {
+        let weeklyOnly = [window(.weekly, LimitWindow.weeklyID)]
+        #expect(TitleSelection.windows(from: weeklyOnly, selection: ["nothing"]).map(\.id)
+            == [LimitWindow.weeklyID])
+    }
+
+    @Test func nothingReportedRendersNothing() {
+        #expect(TitleSelection.windows(from: [], selection: [LimitWindow.sessionID]).isEmpty)
     }
 }

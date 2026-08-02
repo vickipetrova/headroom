@@ -10,9 +10,9 @@ First release.
 
 ### Added
 
-- **Menu bar title** — `✻ 42% · 67%`: session (5-hour) and weekly utilization, colour-coded green
-  under 50%, yellow to 80%, red above. Monospaced digits so the title doesn't shuffle as numbers
-  change.
+- **Menu bar title** — `✻ 42% · 67%`: session (5-hour) and weekly utilization, calm until usage is
+  worth noticing and then yellow, then red (see Colors below). Monospaced digits so the title
+  doesn't shuffle as numbers change, and you choose which limits appear in it.
 - **Dropdown** with each limit window's percentage, reset time, and a live countdown. Countdowns
   refresh in place while the menu is open.
 - **Zero-setup authentication.** Reads the OAuth token Claude Code already holds, from
@@ -21,6 +21,10 @@ First release.
   that name their own model, so the third row reads "THIS WEEK (Opus)" or "THIS WEEK (Fable)"
   according to what your plan actually reports. Falls back to the older `five_hour` /
   `seven_day` / `seven_day_opus` keys per field if the array is absent.
+- **Show in Menu Bar** — choose which limits appear in the menu bar title. The list is built from
+  what the API reports rather than a fixed set, so per-model limits appear by name; the choice is
+  stored per limit identifier, survives a limit disappearing and returning, and always keeps at
+  least one showing.
 - **Colors setting** — *Alerts only* (default) keeps the menu bar and panel calm, colouring only
   once usage passes 50% and again at 80%, so colour carries information instead of being permanently
   on. *System* is fully monochrome and renders the spark as a template image, so the item adapts like

@@ -9,6 +9,25 @@ import SwiftUI
 // render at full strength while `NSMenu` still provides the material background, the dismissal
 // behaviour, and key equivalents for the real commands below them.
 
+/// Which limits the menu bar title shows, given what the response reported and what the user picked.
+///
+/// Pure and separate from `MenuController` so the rules are testable — the controller can't be
+/// constructed in a test, and these are exactly the cases that are awkward to reach by hand: a
+/// scope that disappears from the response, or every chosen scope disappearing at once.
+enum TitleSelection {
+    static func windows(from windows: [LimitWindow], selection: Set<String>) -> [LimitWindow] {
+        // Filtering rather than looking each selected id up: order comes from the response, which
+        // `ClaudeProvider.windows(in:)` already fixes as session, then weekly, then scoped. A
+        // selection whose scope has vanished simply doesn't match, and the stored preference is
+        // untouched, so it renders again if the scope returns.
+        let shown = windows.filter { selection.contains($0.id) }
+        guard shown.isEmpty else { return shown }
+        // Everything chosen has gone missing. One number beats a bare spark, which reads as broken
+        // and offers no route back to the setting.
+        return windows.first { $0.kind == .session }.map { [$0] } ?? Array(windows.prefix(1))
+    }
+}
+
 /// Everything one usage section displays, derived from a `LimitWindow`.
 ///
 /// Pure, so the formatting and the bar arithmetic are unit-testable without standing up any AppKit
@@ -120,9 +139,11 @@ struct PanelTextView: View {
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)  // wrap instead of truncating
             // Bounded, or a long error line lays out at its natural width and drags the whole menu
-            // wider than the usage rows.
-            .frame(maxWidth: PanelMetrics.minimumWidth - PanelMetrics.horizontalPadding * 2,
-                   alignment: .leading)
+            // wider than the usage rows. Deliberately *not* derived from `minimumWidth`: that is a
+            // floor for a menu with nothing in it, and when the two were the same constant, lowering
+            // the floor silently wrapped every error message into a narrow column with dead space
+            // beside it.
+            .frame(maxWidth: PanelMetrics.textWrapWidth, alignment: .leading)
             .padding(.horizontal, PanelMetrics.horizontalPadding)
             .padding(.vertical, 5)
             .frame(minWidth: PanelMetrics.minimumWidth, maxWidth: .infinity, alignment: .leading)
@@ -141,6 +162,13 @@ enum PanelMetrics {
     static let minimumWidth: CGFloat = 200
     static let horizontalPadding: CGFloat = 14
     static let barHeight: CGFloat = 4
+
+    /// How wide message text is allowed to lay out before wrapping.
+    ///
+    /// Tracks the *measured* natural width of a usage row (240pt) rather than `minimumWidth`, so a
+    /// wrapped error line ends where the rows end instead of leaving a column of dead space under
+    /// full-width separators. If the row content changes enough to move that 240, move this too.
+    static var textWrapWidth: CGFloat { 240 - horizontalPadding * 2 }
 }
 
 // MARK: - Hosting

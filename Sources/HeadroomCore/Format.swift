@@ -1,17 +1,17 @@
 import AppKit
 import Foundation
 
-/// Percentages, countdowns, clock times, and the colour ramp. Pure formatting — no state.
+/// Percentages, countdowns, clock times, and the colour modes. Pure formatting — no state.
 ///
 /// `now`, `locale`, and `timeZone` are parameters with live defaults rather than reads of global
 /// state, so every function here is a pure function of its arguments and can be checked without
 /// waiting for a clock or guessing at the machine's region.
 enum Fmt {
-    /// Anthropic's orange: the spark glyph in the menu bar, and the progress bars in the dropdown.
+    /// Anthropic's orange: the spark glyph, and the calm state of the bars in Alerts-only mode.
     ///
-    /// Deliberately not the severity ramp below. The menu bar title is the at-a-glance signal and
-    /// carries green/yellow/red; the panel carries identity, and a bar that turned red would be
-    /// shouting the same thing twice.
+    /// Not a severity colour — `color(_:mode:role:)` owns that. This is the brand, shown while there
+    /// is nothing to report; once usage crosses a threshold both the number and the bar move to
+    /// yellow and then red, and in System mode this colour is not used at all.
     static let spark = NSColor(srgbRed: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255, alpha: 1)
 
     /// Beyond this, a reset time needs a weekday to be unambiguous, and the countdown switches to
@@ -96,13 +96,23 @@ enum Fmt {
         let glyph = "✻" as NSString
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 13),
-            .foregroundColor: mode == .system ? NSColor.labelColor : spark,
+            // Opaque black for the template, not `labelColor`. A template's shape is its *alpha*
+            // channel and the colour is discarded — and `labelColor` is only 0.847 alpha, so drawing
+            // with it produced a spark rendered at 85% strength, visibly lighter than the built-in
+            // template items either side of it. Which is the one thing System mode exists to avoid.
+            .foregroundColor: mode == .system ? NSColor.black : spark,
         ]
         let size = glyph.size(withAttributes: attributes)
-        let image = NSImage(size: NSSize(width: ceil(size.width), height: ceil(size.height)))
-        image.lockFocus()
-        glyph.draw(at: .zero, withAttributes: attributes)
-        image.unlockFocus()
+        // `NSImage(size:flipped:drawingHandler:)` rather than lockFocus/unlockFocus: the handler is
+        // re-run per destination scale, so the glyph stays sharp on a second display with a different
+        // backing scale instead of being rasterized once at whatever the main screen happened to be.
+        // (lockFocus is also deprecated as of macOS 14; the 13.0 deployment target is the only reason
+        // it wasn't warning.)
+        let image = NSImage(size: NSSize(width: ceil(size.width), height: ceil(size.height)),
+                            flipped: false) { _ in
+            glyph.draw(at: .zero, withAttributes: attributes)
+            return true
+        }
         image.isTemplate = mode == .system
         return image
     }
@@ -125,6 +135,10 @@ enum Fmt {
         guard mode == .alertsOnly else {
             return role == .title ? .labelColor : .secondaryLabelColor
         }
+        // Every comparison against NaN is false, so without this it falls through both bands into
+        // `default` and a NaN renders as *red* — an alarm raised by a number we couldn't even read.
+        // `ClaudeProvider` clamps before this point; the guard is for the next provider.
+        guard utilization.isFinite else { return role == .title ? .labelColor : spark }
         switch utilization {
         case ..<50: return role == .title ? .labelColor : spark
         case ..<80: return .systemYellow

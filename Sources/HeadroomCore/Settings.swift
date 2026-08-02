@@ -35,6 +35,42 @@ enum Settings {
         static let refreshMinutes = "refreshMinutes"
         static let notifyThreshold = "notifyThreshold"
         static let colorMode = "colorMode"
+        static let titleLimitIDs = "titleLimitIDs"
+    }
+
+    /// Which limits appear in the menu bar title, by `LimitWindow.id`.
+    ///
+    /// Stored by identifier rather than by display name so that restyling a heading — or the vendor
+    /// renaming a model — doesn't quietly lose the choice. The one caveat worth knowing: a scoped
+    /// window's id is derived from the model's display name, because the endpoint's own
+    /// `scope.model.id` is null in every response we have seen. So a *genuine* model rename does
+    /// lose that one entry; nothing better is on offer from the API.
+    ///
+    /// Ids that no longer appear in the response are kept here on purpose. A scope that vanishes for
+    /// a week and comes back should come back selected.
+    static var titleLimitIDs: Set<String> {
+        get {
+            guard let stored = defaults.array(forKey: Key.titleLimitIDs) as? [String] else {
+                return defaultTitleLimitIDs
+            }
+            // An empty stored set would render a title with no numbers in it at all.
+            return stored.isEmpty ? [LimitWindow.sessionID] : Set(stored)
+        }
+        set { defaults.set(Array(newValue), forKey: Key.titleLimitIDs) }
+    }
+
+    /// The two headline windows — what the title showed before this was configurable.
+    static let defaultTitleLimitIDs: Set<String> = [LimitWindow.sessionID, LimitWindow.weeklyID]
+
+    /// Pure, so the "at least one" rule is testable without a menu.
+    ///
+    /// Unchecking the last one falls back to the session window rather than leaving an empty title:
+    /// a menu bar item showing only the spark looks broken, and there is no way back from it except
+    /// through this same submenu.
+    static func titleLimitIDs(toggling id: String, in current: Set<String>) -> Set<String> {
+        var next = current
+        if next.contains(id) { next.remove(id) } else { next.insert(id) }
+        return next.isEmpty ? [LimitWindow.sessionID] : next
     }
 
     /// Same shape as the two above: a stored value we don't recognise falls back to the default

@@ -196,6 +196,21 @@ import Testing
         }
     }
 
+    /// Every comparison against NaN is false, so a NaN slips past both bands into the `default` case
+    /// and renders as **red** — an alarm raised by a number we couldn't even read. `ClaudeProvider`
+    /// clamps before this point, but `Fmt` is shared with any future provider, and the neighbouring
+    /// `UsageRow.fraction` guards the same value for the same reason.
+    @Test(arguments: [Double.nan, .infinity, -.infinity])
+    func nonFiniteUtilizationIsNotAnAlert(_ utilization: Double) {
+        #expect(title(utilization, .alertsOnly) != .systemRed)
+        #expect(bar(utilization, .alertsOnly) != .systemRed)
+        #expect(title(utilization, .alertsOnly) != .systemYellow)
+        #expect(bar(utilization, .alertsOnly) != .systemYellow)
+        // It renders as the calm state, matching what `Fmt.pct` shows for the same value ("–").
+        #expect(title(utilization, .alertsOnly) == .labelColor)
+        #expect(bar(utilization, .alertsOnly) == Fmt.spark)
+    }
+
     /// The spark is a template only in System mode — that is what lets macOS invert it on highlight
     /// and follow the menu bar between appearances, which a colour-baked image cannot do.
     @Test func sparkIsATemplateOnlyInSystemMode() {
