@@ -17,7 +17,17 @@ struct LimitWindow: Equatable {
     }
 
     let kind: Kind
-    /// Heading for this window in the dropdown, e.g. "THIS WEEK (all models)".
+
+    /// Stable identity — `"session"`, `"weekly"`, `"scoped:Opus"` — and the only thing that should
+    /// ever be used to recognise "the same window" across polls.
+    ///
+    /// Separate from `label` on purpose. Identity used to *be* the display string, which meant
+    /// restyling a heading silently changed which alerts counted as already-sent, and a model
+    /// renamed by the vendor mid-period produced a duplicate alert. (The obvious fix,
+    /// `scope.model.id`, isn't available: that field is null in the real response.)
+    let id: String
+
+    /// Display heading for the dropdown. Free to restyle — nothing keys off it.
     let label: String
     /// Sentence-case form for notifications, e.g. "This week".
     let shortLabel: String
@@ -204,28 +214,44 @@ struct ClaudeProvider: UsageProvider {
                                        utilization: legacy.utilization, resetsAt: legacy.resetsAt))
         }
 
-        return [session, weekly].compactMap { $0 } + scoped
+        // `id` is what the menu matches rows on and what alert markers are keyed on, so it has to be
+        // unique — and it is derived from a server-controlled model name. Two scoped entries sharing
+        // a display name would otherwise collapse: both rows would render the first one's numbers,
+        // and their alerts would share a marker.
+        return [session, weekly].compactMap { $0 } + uniquelyIdentified(scoped)
+    }
+
+    private static func uniquelyIdentified(_ windows: [LimitWindow]) -> [LimitWindow] {
+        var seen: [String: Int] = [:]
+        return windows.map { window in
+            let count = (seen[window.id] ?? 0) + 1
+            seen[window.id] = count
+            guard count > 1 else { return window }
+            return LimitWindow(kind: window.kind, id: "\(window.id)#\(count)",
+                               label: window.label, shortLabel: window.shortLabel,
+                               utilization: window.utilization, resetsAt: window.resetsAt)
+        }
     }
 
     // One builder per window kind, so the array branch and the legacy branch can't drift apart in
     // how they label the same window.
 
     private static func sessionWindow(utilization: Double, resetsAt: Date?) -> LimitWindow {
-        LimitWindow(kind: .session,
-                    label: "SESSION (5-hour window)", shortLabel: "Session",
+        LimitWindow(kind: .session, id: "session",
+                    label: "SESSION · 5-HOUR", shortLabel: "Session",
                     utilization: utilization, resetsAt: resetsAt)
     }
 
     private static func weeklyWindow(utilization: Double, resetsAt: Date?) -> LimitWindow {
-        LimitWindow(kind: .weekly,
-                    label: "THIS WEEK (all models)", shortLabel: "This week",
+        LimitWindow(kind: .weekly, id: "weekly",
+                    label: "THIS WEEK · ALL MODELS", shortLabel: "This week",
                     utilization: utilization, resetsAt: resetsAt)
     }
 
     private static func scopedWindow(model: String, utilization: Double,
                                      resetsAt: Date?) -> LimitWindow {
-        LimitWindow(kind: .weeklyScoped,
-                    label: "THIS WEEK (\(model))",
+        LimitWindow(kind: .weeklyScoped, id: "scoped:\(model)",
+                    label: "THIS WEEK · \(model.uppercased())",
                     shortLabel: "This week (\(model))",
                     utilization: utilization, resetsAt: resetsAt)
     }
@@ -237,7 +263,11 @@ struct ClaudeProvider: UsageProvider {
 
     private static func modelName(_ any: Any?) -> String {
         guard let raw = any as? String else { return "scoped" }
+        // Strips control characters, not just newlines: this string reaches a menu label, a
+        // notification title and a UserDefaults key, and bidi overrides like U+202E can reorder the
+        // text around it.
         let cleaned = raw
+            .components(separatedBy: .controlCharacters).joined(separator: " ")
             .components(separatedBy: .newlines).joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return "scoped" }

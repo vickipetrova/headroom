@@ -112,6 +112,16 @@ enum Credentials {
     /// touched from the serial queue in `ClaudeProvider.fetch`.
     private static var keychainAccessDenied = false
 
+    /// Clears the latch so the next read may prompt again.
+    ///
+    /// Called only from Refresh Now: picking it is the user asking to be asked. Without this the
+    /// latch is a dead end — after one Deny, macOS never asks again for the life of the process, so
+    /// the menu's own advice ("allow Headroom access when macOS asks") can never come true, and this
+    /// app is designed to run for weeks between launches.
+    static func allowKeychainRetry() {
+        keychainAccessDenied = false
+    }
+
     private static func readKeychain() -> Outcome {
         if keychainAccessDenied { return .accessDenied }
 

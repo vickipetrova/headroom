@@ -28,7 +28,7 @@ existing `UsageProvider` protocol.
 
 ## What won't be merged
 
-- **New dependencies.** AppKit, Foundation, Security, UserNotifications, ServiceManagement. The
+- **New dependencies.** AppKit, SwiftUI, Foundation, Security, UserNotifications, ServiceManagement. The
   zero-dependency build is a feature, not an accident — `Package.swift` has no `dependencies:` array
   and shouldn't grow one, for tests either.
 - **Anything that logs, caches, or writes the OAuth token.** See below.

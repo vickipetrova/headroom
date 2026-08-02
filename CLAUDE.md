@@ -28,6 +28,7 @@ There is no Xcode project. SwiftPM compiles the sources and `build.sh` wraps the
 | `Sources/Headroom/main.swift` | Six lines of top-level code. Top-level code can't live in a library target, so this is all the executable target holds |
 | `Sources/HeadroomCore/AppDelegate.swift` | Wires provider → menu, owns the poll timer and the 60s countdown tick, refreshes on wake. The **only** public symbol in the module |
 | `Sources/HeadroomCore/MenuController.swift` | The status item: menu bar title, dropdown, Settings submenu. Knows nothing about where usage comes from |
+| `Sources/HeadroomCore/UsagePanel.swift` | The dropdown's SwiftUI rows, and the pure `UsageRow` view model behind them |
 | `Sources/HeadroomCore/UsageAPI.swift` | `LimitWindow` model, `UsageProvider` protocol, `ClaudeProvider` (endpoint client + all response parsing) |
 | `Sources/HeadroomCore/Credentials.swift` | Token discovery across the login Keychain and the credentials file, ranked rather than first-wins |
 | `Sources/HeadroomCore/Format.swift` | Percentages, countdowns, locale-aware clock times, the colour ramp |
@@ -46,15 +47,18 @@ what makes adding a second provider one new file, so don't put Claude-specific s
 
 1. **Never print, log, or commit the OAuth token**, or the contents of the credentials file. Not in
    debug output, not in error messages, not in CI. `.github/workflows/build.yml` greps for this.
-2. **Zero third-party dependencies.** AppKit, Foundation, Security, UserNotifications,
+2. **Zero third-party dependencies.** AppKit, SwiftUI, Foundation, Security, UserNotifications,
    ServiceManagement. `Package.swift` has no `dependencies:` array and never should. Tests use
    swift-testing, which ships with the toolchain — **not XCTest**, which is absent from the Command
    Line Tools and would break the CLT-only build contract.
 3. **All parsing of the usage endpoint must be defensive.** It is undocumented and it drifts.
    Missing, null, or wrong-typed fields drop that *one* row and render `–`. Never force-unwrap a
    field from the response; never throw on a shape you didn't expect.
-4. **`build.sh` signs ad-hoc only.** It must never handle a Developer ID, an app-specific password,
-   or notarization credentials. Releasing is a manual maintainer step — see `docs/RELEASING.md`.
+4. **No secrets in the repo, and no notarization machinery in `build.sh`.** It signs ad-hoc by
+   default and may use `$HEADROOM_SIGN_ID` — an identity name, resolved from the developer's own
+   Keychain — but it must never contain or handle a certificate, an app-specific password, or
+   anything notarization needs. Releasing stays a manual maintainer step (`docs/RELEASING.md`), and
+   CI signs ad-hoc and drafts the release for a signed build to replace.
 5. **One network destination:** `api.anthropic.com`. No analytics, no update checks.
 
 ## The response shape
@@ -91,6 +95,34 @@ Values are also clamped to 0–100 and checked for finiteness, because `Fmt.pct`
 that traps on infinity or anything past `Int`'s range. `scope.model.display_name` is server-controlled
 and lands in a menu label, a notification title *and* a `UserDefaults` key, so it is trimmed,
 flattened, length-capped, and rejected when empty.
+
+## Why the dropdown's rows are custom views
+
+A menu item that isn't a command has to be disabled, and macOS draws disabled items dimmed — which is
+why the panel used to look washed out. The informational rows are therefore SwiftUI views in
+`NSMenuItem.view`, which AppKit does *not* dim, while `NSMenu` still supplies the material, the
+dismissal behaviour and key equivalents for the real commands.
+
+Four things were measured before committing to this, and each would have sunk it:
+
+- **SwiftUI does repaint while a menu is tracking.** Reassigning `NSHostingView.rootView` updates the
+  row on screen mid-tracking, which is what lets `refreshLiveRows` keep working. If it had deferred
+  until tracking ended, held-open menus would have silently frozen again.
+- **`isEnabled = false` does not dim a custom view** — only the item's own drawing. So these rows can
+  be inert without going grey.
+- **`title` still reaches AppleScript and VoiceOver on a view-backed item**, so `NSMenuItem.hosting`
+  sets it and the `osascript` recipe below still works. Set it on every view-backed row.
+- **Sizing** needs `hostingView.frame.size = hostingView.fittingSize`, or the item lays out at zero
+  height on first display. The SwiftUI frame is `minWidth`/`maxWidth: .infinity`, not a fixed width,
+  and the hosting view carries `autoresizingMask = [.width]`: AppKit sizes the menu from the widest
+  item and adds ~65pt of its own chrome, but lays the view out at x=0 without stretching it, so a
+  fixed-width row leaves that chrome as dead space and the separators visibly overrun the text.
+
+`NSApp.appearance` does **not** drive menu rendering, so dark mode can only be checked by switching
+the system appearance — a forced-appearance probe will render light regardless and mislead you.
+
+Section headings inside the *Settings submenu* are deliberately still plain dimmed items: a greyed
+heading is the conventional look inside a menu, and the rows it labels are commands, not data.
 
 ## The open dropdown
 

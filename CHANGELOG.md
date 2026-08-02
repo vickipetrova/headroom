@@ -33,8 +33,13 @@ First release.
 - `./build.sh` produces a universal (arm64 + x86_64) ad-hoc signed bundle with no Xcode project and
   no third-party dependencies; `--dmg` packages an installer image.
 
-- **Tests.** `swift test` covers endpoint parsing, formatting, alert de-duplication, preference
-  validation, and credential parsing. The project builds through SwiftPM (`Package.swift`, no
+- **The dropdown is a panel, not a greyed-out menu.** Each limit gets a small-caps heading with its
+  reset time, the percentage alongside a countdown, and a slim progress bar in Anthropic orange.
+  Previously every informational row was a *disabled* menu item, which macOS draws dimmed — so the
+  whole panel read as unavailable. Those rows are now custom views, which macOS renders at full
+  strength, while the menu itself still supplies the native material, dismissal and ⌘R/⌘Q.
+- **Tests.** `swift test --disable-xctest` covers endpoint parsing, formatting, alert de-duplication, preference
+  validation, credential parsing, and the dropdown's view model. The project builds through SwiftPM (`Package.swift`, no
   third-party dependencies); `build.sh` still produces the universal, ad-hoc-signed `.app`.
 
 ### Fixed

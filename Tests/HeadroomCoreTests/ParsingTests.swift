@@ -47,9 +47,9 @@ import Testing
 
     @Test func labelsComeFromTheProvider() throws {
         let result = try windows(Self.current)
-        #expect(result[0].label == "SESSION (5-hour window)")
+        #expect(result[0].label == "SESSION · 5-HOUR")
         #expect(result[0].shortLabel == "Session")
-        #expect(result[1].label == "THIS WEEK (all models)")
+        #expect(result[1].label == "THIS WEEK · ALL MODELS")
         #expect(result[1].shortLabel == "This week")
     }
 
@@ -57,7 +57,7 @@ import Testing
     /// doesn't hardcode "Opus" and silently mislabel a different one.
     @Test func scopedLabelUsesTheReportedModelName() throws {
         let result = try windows(Self.current)
-        #expect(result[2].label == "THIS WEEK (Fable)")
+        #expect(result[2].label == "THIS WEEK · FABLE")
         #expect(result[2].shortLabel == "This week (Fable)")
     }
 
@@ -96,7 +96,22 @@ import Testing
           {"kind": "weekly_scoped", "percent": 30, "scope": {"model": {"display_name": "Sonnet"}}}
         ]}
         """#)
-        #expect(result.map(\.label) == ["THIS WEEK (Opus)", "THIS WEEK (Sonnet)"])
+        #expect(result.map(\.id) == ["scoped:Opus", "scoped:Sonnet"])
+    }
+
+    /// `id` is what the menu matches rows on and what alert markers key off, and it is derived from
+    /// a server-controlled name. Two scoped entries sharing a display name must not collapse into
+    /// one identity — both rows would otherwise render the first window's numbers.
+    @Test func duplicateModelNamesStillGetDistinctIdentities() throws {
+        let result = try windows(#"""
+        {"limits": [
+          {"kind": "weekly_scoped", "percent": 20, "scope": {"model": {"display_name": "Opus"}}},
+          {"kind": "weekly_scoped", "percent": 30, "scope": {"model": {"display_name": "Opus"}}}
+        ]}
+        """#)
+        #expect(result.count == 2)
+        #expect(Set(result.map(\.id)).count == 2)
+        #expect(result.map(\.utilization) == [20, 30])
     }
 
     /// The dropdown renders in array order, so scoped windows must always trail the two headline
@@ -134,7 +149,7 @@ import Testing
         #expect(result.count == 3)
         #expect(result.map(\.kind) == [.session, .weekly, .weeklyScoped])
         #expect(result.map(\.utilization) == [42, 67.5, 91])
-        #expect(result[2].label == "THIS WEEK (Opus)")
+        #expect(result[2].id == "scoped:Opus")
     }
 
     /// Three ways `limits` can be useless. Each must fall through to the legacy keys rather than
@@ -183,7 +198,7 @@ import Testing
         }
         """#)
         #expect(result.map(\.utilization) == [10, 2, 3])
-        #expect(result[2].label == "THIS WEEK (Opus)")
+        #expect(result[2].id == "scoped:Opus")
     }
 
     /// Scoped fallback is all-or-nothing by design: one scoped entry from the array suppresses the
@@ -196,7 +211,7 @@ import Testing
         }
         """#)
         #expect(result.count == 1)
-        #expect(result[0].label == "THIS WEEK (Fable)")
+        #expect(result[0].id == "scoped:Fable")
     }
 
     /// A scoped entry the array *dropped* leaves `scoped` empty, so the legacy row reappears.
@@ -207,7 +222,7 @@ import Testing
           "limits": [{"kind": "weekly_scoped", "percent": null, "scope": {"model": {"display_name": "Fable"}}}]
         }
         """#)
-        #expect(result.map(\.label) == ["THIS WEEK (Opus)"])
+        #expect(result.map(\.id) == ["scoped:Opus"])
     }
 
     // MARK: - Drift and malformed payloads
@@ -279,7 +294,7 @@ import Testing
         let result = try windows(#"""
         {"limits": [{"kind": "weekly_scoped", "percent": 30\#(scope)}]}
         """#)
-        #expect(result.map(\.label) == ["THIS WEEK (scoped)"])
+        #expect(result.map(\.id) == ["scoped:scoped"])
     }
 
     /// The model name is server-controlled and ends up in a menu label, a notification title, and a
@@ -298,7 +313,7 @@ import Testing
         {"limits": [{"kind": "weekly_scoped", "percent": 30,
                      "scope": {"model": {"display_name": "Opus\n4.5"}}}]}
         """#)
-        #expect(result.map(\.label) == ["THIS WEEK (Opus 4.5)"])
+        #expect(result.map(\.id) == ["scoped:Opus 4.5"])
     }
 
     /// Regression: `Fmt.pct` converts to Int, and converting a Double to Int traps on a value past
