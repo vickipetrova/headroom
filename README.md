@@ -91,7 +91,14 @@ Everything lives in the dropdown under **Settings**:
 |---|---|---|
 | Refresh every | 1 / 5 / 15 minutes | 5 minutes |
 | Notify above | Off / 50% / 80% / 90% | 80% |
+| Colors | Alerts only / System | Alerts only |
 | Launch at Login | on / off | off |
+
+**Colors** decides how much the menu bar and the panel use colour. *Alerts only* keeps the spark
+orange and everything else in the ordinary label colour until usage is worth noticing, then turns
+yellow at 50% and red at 80% — so colour means "look at this" rather than being permanently on.
+*System* is fully monochrome: the thresholds stop applying entirely and the spark becomes a template
+image, so the whole item adapts like a built-in menu bar control.
 
 Alerts fire at most once per window per reset period, so sitting at 85% doesn't produce an alert on
 every poll. Lowering the threshold mid-window counts as a new crossing and will alert again.

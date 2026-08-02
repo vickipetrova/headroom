@@ -21,8 +21,12 @@ First release.
   that name their own model, so the third row reads "THIS WEEK (Opus)" or "THIS WEEK (Fable)"
   according to what your plan actually reports. Falls back to the older `five_hour` /
   `seven_day` / `seven_day_opus` keys per field if the array is absent.
-- **Settings submenu** — refresh every 1/5/15 minutes, alert above 50/80/90% or off, launch at
-  login. Launch at login delegates to `SMAppService`, so revoking it in System Settings is
+- **Colors setting** — *Alerts only* (default) keeps the menu bar and panel calm, colouring only
+  once usage passes 50% and again at 80%, so colour carries information instead of being permanently
+  on. *System* is fully monochrome and renders the spark as a template image, so the item adapts like
+  a built-in menu bar control.
+- **Settings submenu** — refresh every 1/5/15 minutes, alert above 50/80/90% or off, colours, launch
+  at login. Launch at login delegates to `SMAppService`, so revoking it in System Settings is
   reflected back in the checkmark.
 - **Threshold alerts**, at most one per limit window per reset period. Lowering the threshold
   mid-window counts as a new crossing.
