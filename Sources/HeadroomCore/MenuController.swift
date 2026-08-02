@@ -153,9 +153,7 @@ final class MenuController: NSObject, NSMenuDelegate {
             if let lastError {
                 menu.addItem(row(message(for: lastError)))
             } else if lastUpdated != nil {
-                menu.addItem(row("No plan limits reported for this account."))
-                menu.addItem(row("Pro and Max plans have session and weekly windows;"))
-                menu.addItem(row("metered API-key accounts have no quota to show."))
+                menu.addItem(row("No plan limits reported (metered accounts have no quota)"))
             } else {
                 menu.addItem(row("Loading…"))
             }
