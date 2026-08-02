@@ -34,6 +34,8 @@ There is no Xcode project. SwiftPM compiles the sources and `build.sh` wraps the
 | `Sources/HeadroomCore/Format.swift` | Percentages, countdowns, locale-aware clock times, the colour modes, the menu bar spark image |
 | `Sources/HeadroomCore/Settings.swift` | UserDefaults-backed preferences; launch-at-login proxies `SMAppService` |
 | `Sources/HeadroomCore/Notifier.swift` | Threshold alerts, deduplicated per window per reset period |
+| `assets/Headroom.icon` | Icon Composer document — the icon's source of truth. Two gauge tracks, orange fills, cream gradient |
+| `assets/icon-1024.png` | Flattened export of the above, and the input to the `.icns` |
 
 Everything lives in `HeadroomCore` so the test target can reach it with `@testable`, keeping the
 public API to `AppDelegate` alone. `MenuController` renders `[LimitWindow]` and nothing else — that's
@@ -178,6 +180,65 @@ a denial as "you've never signed in" is wrong advice on the one path every Keych
 A denial also latches, or a user who clicks Deny would be re-prompted on every poll. The lookup runs
 on a serial background queue because that prompt is modal and every `refresh()` caller is the main
 thread.
+
+## The app icon
+
+Headroom is `LSUIElement`: no Dock tile, no window. The bundle icon is what Finder, the DMG, the
+notification banner, Login Items and the Keychain permission prompt show — that is its whole surface
+area, which is why `build.sh` renders one rather than shipping the generic placeholder.
+
+`build.sh` builds it in two tiers, and **the boundary between them is additive on purpose**:
+
+- **Tier 1, always.** `sips` and `iconutil` — both in `/usr/bin` — turn `assets/icon-1024.png` into
+  `Contents/Resources/Headroom.icns`, and the plist gets `CFBundleIconFile`. No Xcode.
+- **Tier 2, when `xcrun --find actool` succeeds.** `actool` compiles `assets/Headroom.icon` into
+  `Assets.car` and the plist also gets `CFBundleIconName`, so macOS 26+ renders the layered icon with
+  its own material and specular treatment instead of a flat bitmap. Skipped silently otherwise, and
+  never fatal — a future `actool` that rejects the document must cost the layered icon, not the build.
+
+The `.icns` is therefore byte-identical whether or not Xcode is installed (verified by `shasum` across
+both paths), so a CLT-only contributor and CI ship the same icon and "it looks different on my
+machine" cannot happen.
+
+Four things were measured, and each is a trap:
+
+- **The export is full-bleed, so it must be inset before anything is downscaled.** Icon Composer
+  writes exports edge to edge — alpha 255 at the top edge centre, 0 only in the corners — because on
+  macOS 26 the system supplies the mask and the shadow. Feeding that straight to `sips` is the obvious
+  recipe and it is wrong: the art fills the whole tile and the icon renders about a quarter larger
+  than every other app in Finder. `sips -z 824 824` then `--padToHeightWidth 1024 1024` puts it on
+  Apple's 824-of-1024 grid; `sips` pads with transparency, so no compositing tool is needed. CI
+  asserts the artwork spans ~80% of its tile, because this regression passes every other check.
+- **Every size is downscaled from one inset master**, not inset individually. That is what keeps the
+  margin proportional at 16px as well as at 1024.
+- **`actool` must compile to a staging directory.** It also writes its own `Headroom.icns`, so
+  compiling straight into `Contents/Resources` would overwrite the complete ten-size family with a
+  four-size subset. `--standalone-icon-behavior` does not turn that output off — `none` still emits
+  it, only smaller. Only `Assets.car` is copied out. Its render is arguably the nicer of the two
+  (Apple's renderer, working from the layered source, and it bakes in a drop shadow this pipeline has
+  no way to reproduce), but taking it would make the bundle differ by build machine.
+- **`build.sh` is `#!/bin/bash`**, and the size table is iterated with `set -- $SPEC`, which
+  word-splits there. It does **not** split under `zsh`, where the same loop silently writes one file
+  named `.png`. Don't paste that loop into a shell to test it.
+
+The two source files live in `assets/`. `Headroom.icon` is the one to edit; `icon-1024.png` is its
+flattened export and has to be re-exported from Icon Composer to match. Intermediates land in
+`build/`, which `.gitignore` already covers.
+
+Cost, since it is a large fraction of a small app: `Assets.car` is ~1.4 MB and the `.icns` ~940 KB.
+The `.icns` is big because the artwork is a soft gradient render in Display P3, not because something
+is packaged wrong.
+
+To check what macOS actually resolves rather than what is merely on disk, ask the icon services —
+`NSWorkspace.shared.icon(forFile:)` on the built bundle, in a scratch script. A bundle with no icon
+still returns an image (the generic placeholder), so compare against
+`NSWorkspace.shared.icon(for: .application)` instead of null-checking. `open build/Headroom.app` is the
+by-eye version: the icon then shows up in Login Items and on any notification. Don't reach for
+`qlmanage -t` — it hangs indefinitely from a non-GUI session rather than returning.
+
+On macOS 26 a bundle containing `Assets.car` renders the *layered* icon, so the `.icns` fallback is
+only exercised by a CLT-only build. `DEVELOPER_DIR=/Library/Developer/CommandLineTools ./build.sh`
+produces one without uninstalling anything, and is how both tiers get tested on one machine.
 
 ## Testing
 
