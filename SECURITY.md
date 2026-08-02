@@ -39,8 +39,8 @@ starts returning one.
 In `UserDefaults` (`com.vickipetrova.headroom`) only:
 
 - your refresh interval and alert threshold
-- one marker per limit window recording the reset timestamp already alerted on, so you don't get
-  the same alert twice
+- one marker per limit window, recording which reset period was already alerted on and at what
+  threshold, so you don't get the same alert twice
 
 Launch at Login is stored by macOS, not by Headroom. No credentials, no usage history, no logs.
 

@@ -67,11 +67,10 @@ enum Notifier {
 
     // MARK: - Markers
 
-    /// Embeds a vendor-controlled display name for scoped windows ("THIS WEEK (Opus)"). If a model is
-    /// renamed mid-period the key changes and that window is announced once more — rare, and it
-    /// self-corrects. The alternative is a key that can't tell two scoped windows apart.
+    /// Keyed on `LimitWindow.id`, never on the display label. Keying on display copy meant restyling
+    /// a heading silently reset which alerts counted as already-sent.
     private static func markerKey(for window: LimitWindow) -> String {
-        "notified.\(window.label)"
+        "notified.\(window.id)"
     }
 
     /// Identifies the reset period currently in effect.

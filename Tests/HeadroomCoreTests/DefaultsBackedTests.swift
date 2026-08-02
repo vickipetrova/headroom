@@ -66,11 +66,13 @@ struct DefaultsBacked {
 
         private let reset = Date(timeIntervalSince1970: 1_785_688_799)
         private let now = Date(timeIntervalSince1970: 1_785_600_000)
-        private let sessionKey = "notified.SESSION (5-hour window)"
+        // Keyed on the window's stable id, not its display label — restyling a heading must not
+        // reset which alerts count as already-sent.
+        private let sessionKey = "notified.session"
 
-        private func window(_ utilization: Double, label: String = "SESSION (5-hour window)",
+        private func window(_ utilization: Double, id: String = "session",
                             resetsAt: Date?) -> LimitWindow {
-            LimitWindow(kind: .session, label: label, shortLabel: "Session",
+            LimitWindow(kind: .session, id: id, label: "SESSION · 5-HOUR", shortLabel: "Session",
                         utilization: utilization, resetsAt: resetsAt)
         }
 
@@ -141,11 +143,26 @@ struct DefaultsBacked {
         @Test func windowsAreTrackedIndependently() {
             Settings.notifyThreshold = 80
             Notifier.evaluate([
-                window(85, label: "SESSION (5-hour window)", resetsAt: reset),
-                window(90, label: "THIS WEEK (all models)", resetsAt: reset),
-                window(10, label: "THIS WEEK (Opus)", resetsAt: reset),
+                window(85, id: "session", resetsAt: reset),
+                window(90, id: "weekly", resetsAt: reset),
+                window(10, id: "scoped:Opus", resetsAt: reset),
             ], now: now)
-            #expect(recorder.labels == ["SESSION (5-hour window)", "THIS WEEK (all models)"])
+            #expect(recorder.count == 2)
+            #expect(defaults.string(forKey: "notified.session") != nil)
+            #expect(defaults.string(forKey: "notified.weekly") != nil)
+            #expect(defaults.string(forKey: "notified.scoped:Opus") == nil)
+        }
+
+        /// Restyling a heading must not look like a new window and re-announce a crossing already
+        /// sent — the reason identity moved off the display label.
+        @Test func relabellingAWindowDoesNotReAlert() {
+            Settings.notifyThreshold = 80
+            Notifier.evaluate([window(85, resetsAt: reset)], now: now)
+            let restyled = LimitWindow(kind: .session, id: "session",
+                                       label: "COMPLETELY DIFFERENT HEADING", shortLabel: "Session",
+                                       utilization: 85, resetsAt: reset)
+            Notifier.evaluate([restyled], now: now)
+            #expect(recorder.count == 1)
         }
 
         /// Lowering the threshold is a crossing the user just asked to hear about.

@@ -21,13 +21,16 @@ final class MenuController: NSObject, NSMenuDelegate {
     /// A row that can be rewritten in place while the menu sits open, so a menu held across a tick
     /// or a poll stays honest without being rebuilt underneath the user.
     ///
-    /// `text` reads *current* state each time it is called rather than closing over a value — see
-    /// `window(labelled:)`. It returns nil for "leave this row's text alone", which is what a row
-    /// whose window has vanished from the latest poll does: one-poll-stale beats blanking the row
-    /// or writing some other window's number into it.
-    private struct LiveRow { let item: NSMenuItem; let text: () -> String? }
+    /// `apply` reads *current* state each time it runs rather than closing over a value — see
+    /// `window(id:)`. A row whose window has vanished from the latest poll leaves itself alone:
+    /// one-poll-stale beats blanking the row or writing some other window's number into it.
+    ///
+    /// It performs the update rather than returning a string because rows are no longer all the same
+    /// kind — a view-backed row is refreshed by handing its `NSHostingView` a new `rootView`, which
+    /// the spike for this design confirmed does repaint while the menu is tracking.
+    private struct LiveRow { let apply: () -> Void }
 
-    /// Rebuilt with the menu, and cleared before it — these hold strong references to `NSMenuItem`s.
+    /// Rebuilt with the menu, and cleared before it — these closures retain their views.
     private var liveRows: [LiveRow] = []
 
     override init() {
@@ -78,16 +81,11 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     private func refreshLiveRows() {
         guard isMenuOpen else { return }  // Closed menus rebuild from scratch on the way open.
-        // Hazard: `NSMenuItem.attributedTitle` takes precedence over `title`, silently and with no
-        // compiler complaint if both are set. This works today only because `header(_:)` is the sole
-        // builder that sets `attributedTitle` and every live row comes from `row(_:)`, which sets
-        // `title`. Colourizing a percentage row with `Fmt.color`, as the menu bar title does, would
-        // turn every assignment below into a no-op; such a row has to be refreshed by re-setting its
-        // attributed string instead.
-        for row in liveRows {
-            guard let text = row.text() else { continue }
-            row.item.title = text
-        }
+        // Hazard worth knowing before adding a row kind: on a view-backed item, `title` is not drawn
+        // at all, and on a plain item `attributedTitle` silently beats `title`. Either way the
+        // compiler says nothing, and the symptom is a row that quietly stops updating. Each row
+        // therefore owns the way it refreshes itself, rather than this loop assuming one.
+        for row in liveRows { row.apply() }
     }
 
     // MARK: - Menu bar title
@@ -150,22 +148,32 @@ final class MenuController: NSObject, NSMenuDelegate {
         menu.removeAllItems()
 
         if windows.isEmpty {
-            if let lastError {
-                menu.addItem(row(message(for: lastError)))
+            if lastError != nil {
+                // Reads current state rather than the error bound here, so a later failure while the
+                // menu is open rewrites this row instead of freezing the first one.
+                menu.addItem(textRow { [weak self] in
+                    guard let self, let error = self.lastError else { return nil }
+                    return self.message(for: error)
+                })
             } else if lastUpdated != nil {
-                menu.addItem(row("No plan limits reported (metered accounts have no quota)"))
+                menu.addItem(textRow {
+                    """
+                    No plan limits reported for this account. Pro and Max plans have session and \
+                    weekly windows; metered API-key accounts have no quota to show.
+                    """
+                })
             } else {
-                menu.addItem(row("Loading…"))
+                menu.addItem(textRow { "Loading…" })
             }
         } else {
             for (index, window) in windows.enumerated() {
                 if index > 0 { menu.addItem(.separator()) }
-                menu.addItem(header(window.label))
-                menu.addItem(percentRow(for: window))
-                menu.addItem(resetRow(for: window))
+                menu.addItem(usageRow(for: window))
             }
-            menu.addItem(.separator())
-            menu.addItem(footerRow())
+            if lastError != nil {
+                menu.addItem(.separator())
+                menu.addItem(errorRow())
+            }
         }
 
         if Settings.notifyThreshold > 0, Notifier.alertsBlocked {
@@ -176,7 +184,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        menu.addItem(action("Refresh Now", key: "r", selector: #selector(refreshClicked)))
+        menu.addItem(refreshRow())
         menu.addItem(settingsItem())
         menu.addItem(action("Quit Headroom", key: "q", selector: #selector(quitClicked)))
     }
@@ -236,44 +244,61 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     // MARK: - Live rows
 
-    /// Builds a disabled row and registers it for in-place refresh. `text` is the row's contents at
-    /// *any* moment, not just this one: it runs here to seed the item, and again on every tick and
-    /// every poll.
-    private func liveRow(_ text: @escaping () -> String?) -> NSMenuItem {
-        let item = row(text() ?? "")
-        liveRows.append(LiveRow(item: item, text: text))
+    /// One usage section: heading with its reset time, the percentage with a countdown, and the bar.
+    ///
+    /// Registered for in-place refresh, keyed on the window's stable `id` so a poll that reorders or
+    /// relabels windows still finds the right one.
+    private func usageRow(for window: LimitWindow) -> NSMenuItem {
+        let id = window.id
+        let row = UsageRow(window)
+        let (item, hosting) = NSMenuItem.hosting(UsageRowView(row: row), title: row.spoken)
+        liveRows.append(LiveRow { [weak self] in
+            guard let self, let window = self.window(id: id) else { return }
+            let row = UsageRow(window)
+            hosting.rootView = UsageRowView(row: row)
+            item.title = row.spoken
+        })
         return item
     }
 
-    private func percentRow(for window: LimitWindow) -> NSMenuItem {
-        let label = window.label
-        return liveRow { [weak self] in
-            guard let window = self?.window(labelled: label) else { return nil }
-            return "\(Fmt.pct(window.utilization)) used"
+    /// A message-only row: the footer, an error, "Loading…".
+    private func textRow(_ text: @escaping () -> String?) -> NSMenuItem {
+        let initial = text() ?? ""
+        let (item, hosting) = NSMenuItem.hosting(PanelTextView(text: initial), title: initial)
+        liveRows.append(LiveRow {
+            guard let latest = text() else { return }
+            hosting.rootView = PanelTextView(text: latest)
+            item.title = latest
+        })
+        return item
+    }
+
+    /// Errors only. How fresh the numbers are is shown on the Refresh Now row instead, where it sits
+    /// next to the thing that acts on it — and the error copy already carries its own timestamp
+    /// ("Showing data from 14:02"), so a separate Updated line would have said it twice.
+    private func errorRow() -> NSMenuItem {
+        textRow { [weak self] in
+            guard let self, let lastError = self.lastError else { return nil }
+            return self.message(for: lastError)
         }
     }
 
-    private func resetRow(for window: LimitWindow) -> NSMenuItem {
-        let label = window.label
-        return liveRow { [weak self] in
-            guard let window = self?.window(labelled: label) else { return nil }
-            return Fmt.resetLine(for: window.resetsAt)
-        }
-    }
-
-    /// One row for two states. The error copy already carries the timestamp ("Showing data from
-    /// 14:02"), so an Updated row beside it would say the same thing twice.
+    /// Refresh Now, carrying how old the numbers are.
     ///
-    /// Only built in the branch where `windows` is non-empty, which is also the only way
-    /// `lastUpdated` is set — so in practice one of the two branches below always has something to
-    /// say, and the empty fallback is unreachable rather than a blank row anyone can see.
-    private func footerRow() -> NSMenuItem {
-        liveRow { [weak self] in
-            guard let self else { return nil }
-            if let lastError { return message(for: lastError) }
-            if let lastUpdated { return "Updated \(Fmt.clock(lastUpdated))" }
-            return nil
-        }
+    /// A plain `NSMenuItem`, deliberately, even though a view-backed one could draw a nicer badge.
+    /// Two things measured on a view-backed version decided it: a hosting view swallows the mouse
+    /// event, so `NSMenuItem.action` never fires and the row has to reimplement its own selection;
+    /// and `keyEquivalent` stops working entirely — ⌘Q on a plain item kept working while ⌘R on the
+    /// view-backed row did nothing, and `NSMenuDelegate.menuHasKeyEquivalent`, the documented hook
+    /// for reclaiming it, is not consulted for status-item menus. Plain text costs a rounded badge;
+    /// a custom view costs the shortcut, the native highlight, and AppKit's click routing.
+    ///
+    /// Registered as a live row so the age keeps counting up while the menu is held open.
+    private func refreshRow() -> NSMenuItem {
+        let title = { [weak self] in "Refresh Now — updated \(Fmt.age(of: self?.lastUpdated))" }
+        let item = action(title(), key: "r", selector: #selector(refreshClicked))
+        liveRows.append(LiveRow { item.title = title() })
+        return item
     }
 
     /// The window this row was built for, as it stands in the *latest* poll.
@@ -282,12 +307,10 @@ final class MenuController: NSObject, NSMenuDelegate {
     /// on counting down to the reset of a window the poll had already replaced, reach "now", and
     /// stay pinned there until the menu was closed and reopened.
     ///
-    /// `label` is the identity, matching `Notifier.markerKey(for:)`, which keys its
-    /// already-announced markers on exactly the same string — including the vendor-supplied model
-    /// name that distinguishes two scoped weekly windows. Two windows sharing a label would have to
-    /// be the same window for that dedupe to be correct, so it is the right key here too.
-    private func window(labelled label: String) -> LimitWindow? {
-        windows.first { $0.label == label }
+    /// Matched on `id`, the same key `Notifier.markerKey(for:)` uses — not on the display label,
+    /// which is free to be restyled.
+    private func window(id: String) -> LimitWindow? {
+        windows.first { $0.id == id }
     }
 
     /// The plan's error copy, plus the "you're looking at old numbers" note that only makes sense
@@ -301,18 +324,15 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     // MARK: - Item builders
 
+    /// Section headings for the Settings submenu only. The main panel's headings are drawn by
+    /// `UsageRowView`; inside a submenu a dimmed heading is the conventional macOS look, and the
+    /// rows it labels are real commands rather than data.
     private func header(_ text: String) -> NSMenuItem {
         let item = NSMenuItem()
         item.attributedTitle = NSAttributedString(string: text, attributes: [
             .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
             .foregroundColor: NSColor.secondaryLabelColor,
         ])
-        item.isEnabled = false
-        return item
-    }
-
-    private func row(_ text: String) -> NSMenuItem {
-        let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
         item.isEnabled = false
         return item
     }
@@ -330,6 +350,11 @@ final class MenuController: NSObject, NSMenuDelegate {
         NSWorkspace.shared.open(url)
     }
 
-    @objc private func refreshClicked() { onRefresh?() }
+    @objc private func refreshClicked() {
+        // Asking for a refresh is consent to be asked for Keychain access again, if a previous Deny
+        // latched it off. Otherwise the error row's advice is unreachable without relaunching.
+        Credentials.allowKeychainRetry()
+        onRefresh?()
+    }
     @objc private func quitClicked() { NSApp.terminate(nil) }
 }

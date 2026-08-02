@@ -7,7 +7,11 @@ import Foundation
 /// state, so every function here is a pure function of its arguments and can be checked without
 /// waiting for a clock or guessing at the machine's region.
 enum Fmt {
-    /// Anthropic's orange, used only for the spark glyph.
+    /// Anthropic's orange: the spark glyph in the menu bar, and the progress bars in the dropdown.
+    ///
+    /// Deliberately not the severity ramp below. The menu bar title is the at-a-glance signal and
+    /// carries green/yellow/red; the panel carries identity, and a bar that turned red would be
+    /// shouting the same thing twice.
     static let spark = NSColor(srgbRed: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255, alpha: 1)
 
     /// Beyond this, a reset time needs a weekday to be unambiguous, and the countdown switches to
@@ -54,6 +58,21 @@ enum Fmt {
         formatter.setLocalizedDateFormatFromTemplate(
             date.timeIntervalSince(now) >= dayThreshold ? "EEE jmm" : "jmm")
         return formatter.string(from: date)
+    }
+
+    /// How long ago the numbers on screen were fetched: "just now", "5m ago", "2h ago".
+    ///
+    /// Deliberately vaguer than a clock time. Next to a Refresh command the useful question is "are
+    /// these stale?", and "4m ago" answers it without the reader having to subtract.
+    static func age(of date: Date?, from now: Date = Date()) -> String {
+        guard let date else { return "never" }
+        let seconds = Int(now.timeIntervalSince(date))
+        if seconds < 45 { return "just now" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(max(minutes, 1))m ago" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours)h ago" }
+        return "\(hours / 24)d ago"
     }
 
     /// The one place this sentence is written. It used to exist separately in the dropdown and in

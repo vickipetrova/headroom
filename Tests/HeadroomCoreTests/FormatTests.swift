@@ -52,6 +52,29 @@ import Testing
         #expect(Fmt.countdown(to: Date(timeIntervalSince1970: .infinity), from: now) == "unknown")
     }
 
+    // MARK: - Age of the data
+
+    /// Shown next to Refresh Now, so it answers "are these numbers stale?" rather than "what time
+    /// was it?". Under a minute reads as "just now" rather than "0m ago", which would look broken.
+    @Test(arguments: [
+        (0.0, "just now"), (44.0, "just now"), (45.0, "1m ago"), (59.0, "1m ago"),
+        (60.0, "1m ago"), (301.0, "5m ago"), (3_599.0, "59m ago"),
+        (3_600.0, "1h ago"), (86_399.0, "23h ago"), (86_400.0, "1d ago"), (200_000.0, "2d ago"),
+    ])
+    func ageReadsAsElapsedTime(_ elapsed: TimeInterval, _ expected: String) {
+        #expect(Fmt.age(of: offset(-elapsed), from: now) == expected)
+    }
+
+    @Test func ageOfNothingIsNever() {
+        #expect(Fmt.age(of: nil, from: now) == "never")
+    }
+
+    /// A clock that jumps backwards (NTP correction, timezone change) must not produce a negative
+    /// age or a crash.
+    @Test func aFutureTimestampDoesNotGoNegative() {
+        #expect(Fmt.age(of: offset(3_600), from: now) == "just now")
+    }
+
     // MARK: - Clock times
 
     @Test func clockOfNothingIsAQuestionMark() {
