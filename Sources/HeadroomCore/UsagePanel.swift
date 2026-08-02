@@ -122,9 +122,15 @@ struct PanelTextView: View {
 }
 
 enum PanelMetrics {
-    /// A floor, not a fixed width — see `NSMenuItem.hosting`. The menu ends up wider than this
-    /// (it adds its own chrome), and the rows stretch to match.
-    static let minimumWidth: CGFloat = 300
+    /// A floor, not a target — see `NSMenuItem.hosting`. Only wide enough that a menu showing
+    /// nothing but "Loading…" isn't a sliver; the usage rows are all wider than this on their own,
+    /// so in practice the menu sizes to its content.
+    ///
+    /// It was 300 for no reason beyond being the number picked while building the panel, and since
+    /// AppKit adds a constant 65pt of chrome that made every menu 365pt wide. Measured: the widest
+    /// row wants 240pt naturally (the weekly heading plus its reset time), so the menu now settles
+    /// at 305pt. Going below that means shortening the copy, not adjusting this.
+    static let minimumWidth: CGFloat = 200
     static let horizontalPadding: CGFloat = 14
     static let barHeight: CGFloat = 4
 }
