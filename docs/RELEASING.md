@@ -30,14 +30,21 @@ One-time setup on your Mac:
 1. A **Developer ID Application** certificate in your Keychain (Xcode › Settings › Accounts ›
    Manage Certificates). Note: an *Apple Development* certificate is not enough for distribution.
 2. A notarytool credential profile, using an
-   [app-specific password](https://support.apple.com/en-us/102654) — not your Apple ID password:
+   [app-specific password](https://support.apple.com/en-us/102654) — not your Apple ID password.
+
+   Run this from anywhere; it writes to your login Keychain, not to the working directory. Note the
+   absence of `--password`: leaving it off makes notarytool prompt for the password invisibly, which
+   keeps it out of your shell history and out of `ps` output, where any local process could read it.
+   The command validates against Apple before saving, so a typo fails here rather than at release
+   time.
 
 ```bash
 xcrun notarytool store-credentials "headroom" \
   --apple-id you@example.com \
-  --team-id YOURTEAMID \
-  --password xxxx-xxxx-xxxx-xxxx
+  --team-id YOURTEAMID
 ```
+
+   `YOURTEAMID` is the parenthesised code in `security find-identity -v -p codesigning`.
 
 Then, per release:
 
