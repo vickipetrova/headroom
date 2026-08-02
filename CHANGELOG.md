@@ -10,19 +10,27 @@ First release.
 
 ### Added
 
-- **Menu bar title** — `✻ 42% · 67%`: session (5-hour) and weekly utilization, colour-coded green
-  under 50%, yellow to 80%, red above. Monospaced digits so the title doesn't shuffle as numbers
-  change.
+- **Menu bar title** — `✻ 42% · 67%`: session (5-hour) and weekly utilization, calm until usage is
+  worth noticing and then yellow, then red (see Colors below). Monospaced digits so the title
+  doesn't shuffle as numbers change, and you choose which limits appear in it.
 - **Dropdown** with each limit window's percentage, reset time, and a live countdown. Countdowns
   refresh in place while the menu is open.
 - **Zero-setup authentication.** Reads the OAuth token Claude Code already holds, from
   `~/.claude/.credentials.json` or the login Keychain. Nothing to paste, no cookies, no DevTools.
 - **Per-model weekly limits.** The usage endpoint's `limits` array reports model-scoped windows
-  that name their own model, so the third row reads "THIS WEEK (Opus)" or "THIS WEEK (Fable)"
+  that name their own model, so the third row reads "WEEKLY · OPUS" or "WEEKLY · FABLE"
   according to what your plan actually reports. Falls back to the older `five_hour` /
   `seven_day` / `seven_day_opus` keys per field if the array is absent.
-- **Settings submenu** — refresh every 1/5/15 minutes, alert above 50/80/90% or off, launch at
-  login. Launch at login delegates to `SMAppService`, so revoking it in System Settings is
+- **Show in Menu Bar** — choose which limits appear in the menu bar title. The list is built from
+  what the API reports rather than a fixed set, so per-model limits appear by name; the choice is
+  stored per limit identifier, survives a limit disappearing and returning, and always keeps at
+  least one showing.
+- **Colors setting** — *Alerts only* (default) keeps the menu bar and panel calm, colouring only
+  once usage passes 50% and again at 80%, so colour carries information instead of being permanently
+  on. *System* is fully monochrome and renders the spark as a template image, so the item adapts like
+  a built-in menu bar control.
+- **Settings submenu** — refresh every 1/5/15 minutes, alert above 50/80/90% or off, colours, launch
+  at login. Launch at login delegates to `SMAppService`, so revoking it in System Settings is
   reflected back in the checkmark.
 - **Threshold alerts**, at most one per limit window per reset period. Lowering the threshold
   mid-window counts as a new crossing.
@@ -38,8 +46,8 @@ First release.
   Previously every informational row was a *disabled* menu item, which macOS draws dimmed — so the
   whole panel read as unavailable. Those rows are now custom views, which macOS renders at full
   strength, while the menu itself still supplies the native material, dismissal and ⌘R/⌘Q.
-  **Refresh Now** says how old the numbers are — "updated just now", "updated 5m ago" — instead of
-  a separate Updated line, so freshness sits next to the thing that acts on it.
+  **Refresh Now** says how old the numbers are — "Refresh Now (just now)", "Refresh Now (5m ago)" —
+  instead of a separate Updated line, so freshness sits next to the thing that acts on it.
 - **Tests.** `swift test --disable-xctest` covers endpoint parsing, formatting, alert de-duplication, preference
   validation, credential parsing, and the dropdown's view model. The project builds through SwiftPM (`Package.swift`, no
   third-party dependencies); `build.sh` still produces the universal, ad-hoc-signed `.app`.
@@ -70,7 +78,7 @@ Found in a pre-release code review, before first release:
   the menu was on screen, and a countdown would keep running toward a reset time that had already
   been replaced — reaching "now" and staying pinned there until the menu was closed and reopened.
 - **A model name reported by the server flowed unbounded into the menu, notifications and stored
-  preferences.** It is now trimmed, length-capped, and an empty one no longer renders "THIS WEEK ()".
+  preferences.** It is now trimmed, length-capped, and an empty one no longer renders a heading with empty brackets.
 - **The documented release procedure discarded its own notarization.** It rebuilt the app after
   signing and stapling, replacing both with an ad-hoc signature before packaging the DMG. `build.sh`
   gained `--dmg-only` for that step.

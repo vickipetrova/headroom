@@ -28,10 +28,10 @@ There is no Xcode project. SwiftPM compiles the sources and `build.sh` wraps the
 | `Sources/Headroom/main.swift` | Six lines of top-level code. Top-level code can't live in a library target, so this is all the executable target holds |
 | `Sources/HeadroomCore/AppDelegate.swift` | Wires provider → menu, owns the poll timer and the 60s countdown tick, refreshes on wake. The **only** public symbol in the module |
 | `Sources/HeadroomCore/MenuController.swift` | The status item: menu bar title, dropdown, Settings submenu. Knows nothing about where usage comes from |
-| `Sources/HeadroomCore/UsagePanel.swift` | The dropdown's SwiftUI rows, and the pure `UsageRow` view model behind them |
+| `Sources/HeadroomCore/UsagePanel.swift` | The dropdown's SwiftUI rows, and the pure `UsageRow` view model behind them. Which limits reach the *menu bar title* is `TitleSelection`, in MenuController.swift |
 | `Sources/HeadroomCore/UsageAPI.swift` | `LimitWindow` model, `UsageProvider` protocol, `ClaudeProvider` (endpoint client + all response parsing) |
 | `Sources/HeadroomCore/Credentials.swift` | Token discovery across the login Keychain and the credentials file, ranked rather than first-wins |
-| `Sources/HeadroomCore/Format.swift` | Percentages, countdowns, locale-aware clock times, the colour ramp |
+| `Sources/HeadroomCore/Format.swift` | Percentages, countdowns, locale-aware clock times, the colour modes, the menu bar spark image |
 | `Sources/HeadroomCore/Settings.swift` | UserDefaults-backed preferences; launch-at-login proxies `SMAppService` |
 | `Sources/HeadroomCore/Notifier.swift` | Threshold alerts, deduplicated per window per reset period |
 
@@ -67,7 +67,7 @@ The endpoint returns two overlapping shapes, and `ClaudeProvider.windows(in:)` r
 
 - **Preferred:** a `limits` array of `{kind, percent, resets_at, scope}` where `kind` is `session`,
   `weekly_all`, or `weekly_scoped`. Scoped entries name their own model in
-  `scope.model.display_name`, which is why the third row says "THIS WEEK (Fable)" rather than
+  `scope.model.display_name`, which is why the third row says "WEEKLY · FABLE" rather than
   hardcoding Opus.
 - **Legacy:** top-level `five_hour`, `seven_day`, `seven_day_opus` with `utilization` / `resets_at`.
   Used to fill in anything the array didn't provide, **per field**.
@@ -141,7 +141,7 @@ Settings submenu, it re-targets a click already in flight (aim at "Refresh Now",
 Headroom"), and it destroys highlight and keyboard state. `menuNeedsUpdate` also fires during ⌘R/⌘Q
 key-equivalent matching, so this is reachable without the menu ever being clicked.
 
-Live rows close over the window's **label** and look it up in current state, never over a
+Live rows close over the window's **`id`** and look it up in current state, never over a
 `LimitWindow` value. Capturing the value made a held-open menu keep counting down to a reset the poll
 had already replaced, reach "now", and stay pinned there until the menu was reopened.
 

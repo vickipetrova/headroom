@@ -10,12 +10,76 @@ enum Settings {
     /// Utilization percentage that triggers an alert. 0 means never.
     static let thresholdOptions = [0, 50, 80, 90]
 
+    /// How much colour the menu bar and the panel use.
+    enum ColorMode: String, CaseIterable {
+        /// Colour means "pay attention": ordinary label colour and the brand orange until usage is
+        /// worth noticing, then yellow, then red. The default, because a permanent green at 3% used
+        /// is noise — it says "fine" in the state you are in almost always.
+        case alertsOnly
+        /// No colour at all. Everything takes a system label colour and the spark becomes a template
+        /// image, so the whole item adapts like a built-in menu bar control.
+        case system
+
+        var label: String {
+            switch self {
+            case .alertsOnly: return "Alerts only"
+            case .system: return "System"
+            }
+        }
+    }
+
     /// Reassigned only by tests, which point it at a scratch suite rather than the real preferences.
     static var defaults = UserDefaults.standard
 
     private enum Key {
         static let refreshMinutes = "refreshMinutes"
         static let notifyThreshold = "notifyThreshold"
+        static let colorMode = "colorMode"
+        static let titleLimitIDs = "titleLimitIDs"
+    }
+
+    /// Which limits appear in the menu bar title, by `LimitWindow.id`.
+    ///
+    /// Stored by identifier rather than by display name so that restyling a heading — or the vendor
+    /// renaming a model — doesn't quietly lose the choice. The one caveat worth knowing: a scoped
+    /// window's id is derived from the model's display name, because the endpoint's own
+    /// `scope.model.id` is null in every response we have seen. So a *genuine* model rename does
+    /// lose that one entry; nothing better is on offer from the API.
+    ///
+    /// Ids that no longer appear in the response are kept here on purpose. A scope that vanishes for
+    /// a week and comes back should come back selected.
+    static var titleLimitIDs: Set<String> {
+        get {
+            guard let stored = defaults.array(forKey: Key.titleLimitIDs) as? [String] else {
+                return defaultTitleLimitIDs
+            }
+            // An empty stored set would render a title with no numbers in it at all.
+            return stored.isEmpty ? [LimitWindow.sessionID] : Set(stored)
+        }
+        set { defaults.set(Array(newValue), forKey: Key.titleLimitIDs) }
+    }
+
+    /// The two headline windows — what the title showed before this was configurable.
+    static let defaultTitleLimitIDs: Set<String> = [LimitWindow.sessionID, LimitWindow.weeklyID]
+
+    /// Pure, so the "at least one" rule is testable without a menu.
+    ///
+    /// Unchecking the last one falls back to the session window rather than leaving an empty title:
+    /// a menu bar item showing only the spark looks broken, and there is no way back from it except
+    /// through this same submenu.
+    static func titleLimitIDs(toggling id: String, in current: Set<String>) -> Set<String> {
+        var next = current
+        if next.contains(id) { next.remove(id) } else { next.insert(id) }
+        return next.isEmpty ? [LimitWindow.sessionID] : next
+    }
+
+    /// Same shape as the two above: a stored value we don't recognise falls back to the default
+    /// rather than leaving the app in a mode that doesn't exist.
+    static var colorMode: ColorMode {
+        get {
+            defaults.string(forKey: Key.colorMode).flatMap(ColorMode.init(rawValue:)) ?? .alertsOnly
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.colorMode) }
     }
 
     /// Values outside the offered set fall back to the default, so a hand-edited plist can't

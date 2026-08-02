@@ -1,5 +1,24 @@
 import AppKit
 
+/// Which limits the menu bar title shows, given what the response reported and what the user picked.
+///
+/// Pure and separate from `MenuController` so the rules are testable — the controller can't be
+/// constructed in a test, and these are exactly the cases that are awkward to reach by hand: a
+/// scope that disappears from the response, or every chosen scope disappearing at once.
+enum TitleSelection {
+    static func windows(from windows: [LimitWindow], selection: Set<String>) -> [LimitWindow] {
+        // Filtering rather than looking each selected id up: order comes from the response, which
+        // `ClaudeProvider.windows(in:)` already fixes as session, then weekly, then scoped. A
+        // selection whose scope has vanished simply doesn't match, and the stored preference is
+        // untouched, so it renders again if the scope returns.
+        let shown = windows.filter { selection.contains($0.id) }
+        guard shown.isEmpty else { return shown }
+        // Everything chosen has gone missing. One number beats a bare spark, which reads as broken
+        // and offers no route back to the setting.
+        return windows.first { $0.kind == .session }.map { [$0] } ?? Array(windows.prefix(1))
+    }
+}
+
 /// Owns the status item: the title in the menu bar and the dropdown behind it.
 ///
 /// Knows nothing about where usage comes from — it is handed `[LimitWindow]` and renders it.
@@ -93,33 +112,44 @@ final class MenuController: NSObject, NSMenuDelegate {
     private func renderTitle() {
         guard let button = statusItem.button else { return }
 
+        // The spark is an image rather than a character in the title so that System mode can hand it
+        // to macOS as a template and have it adapt exactly like a built-in menu bar control —
+        // including inverting when the item is highlighted, which coloured text does not do.
+        button.image = Fmt.sparkImage(mode: Settings.colorMode)
+        button.imagePosition = .imageLeading
+
         guard !windows.isEmpty else {
             button.attributedTitle = NSAttributedString()
-            if lastError != nil { button.title = "✻ !" }
+            if lastError != nil { button.title = "!" }
             // A clean fetch that reported nothing isn't an error and isn't still loading —
             // API-key accounts have no plan quota to report.
-            else if lastUpdated != nil { button.title = "✻ –" }
-            else { button.title = "✻ …" }
+            else if lastUpdated != nil { button.title = "–" }
+            else { button.title = "…" }
             return
         }
 
+        let mode = Settings.colorMode
         let title = NSMutableAttributedString()
-        title.append(NSAttributedString(string: "✻ ", attributes: [
-            .foregroundColor: Fmt.spark,
-            .font: NSFont.systemFont(ofSize: 13),
-        ]))
-        title.append(percentage(of: windows.first { $0.kind == .session }))
-        title.append(NSAttributedString(string: " · ", attributes: [
-            .foregroundColor: NSColor.secondaryLabelColor,
-        ]))
-        title.append(percentage(of: windows.first { $0.kind == .weekly }))
+        for (index, window) in titleWindows().enumerated() {
+            if index > 0 {
+                title.append(NSAttributedString(string: " · ", attributes: [
+                    .foregroundColor: NSColor.secondaryLabelColor,
+                ]))
+            }
+            title.append(percentage(of: window, mode: mode))
+        }
         button.attributedTitle = title
     }
 
-    private func percentage(of window: LimitWindow?) -> NSAttributedString {
+    private func titleWindows() -> [LimitWindow] {
+        TitleSelection.windows(from: windows, selection: Settings.titleLimitIDs)
+    }
+
+    private func percentage(of window: LimitWindow?, mode: Settings.ColorMode) -> NSAttributedString {
         // Monospaced digits so the title doesn't shuffle sideways as the numbers tick over.
         NSAttributedString(string: Fmt.pct(window?.utilization), attributes: [
-            .foregroundColor: window.map { Fmt.color($0.utilization) } ?? NSColor.secondaryLabelColor,
+            .foregroundColor: window.map { Fmt.color($0.utilization, mode: mode, role: .title) }
+                ?? NSColor.secondaryLabelColor,
             .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
         ])
     }
@@ -217,6 +247,40 @@ final class MenuController: NSObject, NSMenuDelegate {
             submenu.addItem(item)
         }
 
+        // Built from the windows the response actually reported, never from a hardcoded list — the
+        // set of model-scoped limits is the vendor's to change, and has already changed once.
+        // Omitted entirely when there is nothing to choose between yet.
+        if !windows.isEmpty {
+            submenu.addItem(.separator())
+            submenu.addItem(header("SHOW IN MENU BAR"))
+            let selected = Settings.titleLimitIDs
+            // What the title is *actually* showing, which differs from the selection when every
+            // chosen scope has vanished and `TitleSelection` fell back. Marking that row `.mixed`
+            // rather than `.off` stops the submenu claiming a limit is hidden while its number is
+            // sitting in the menu bar.
+            let rendered = Set(TitleSelection.windows(from: windows, selection: selected).map(\.id))
+            for window in windows {
+                let item = action(window.optionLabel,
+                                  key: "", selector: #selector(toggleTitleLimit(_:)))
+                // The id goes in `representedObject`, not `tag`: tags are Int and these are strings,
+                // and a positional tag would break the moment the response reorders.
+                item.representedObject = window.id
+                if selected.contains(window.id) { item.state = .on }
+                else if rendered.contains(window.id) { item.state = .mixed }
+                else { item.state = .off }
+                submenu.addItem(item)
+            }
+        }
+
+        submenu.addItem(.separator())
+        submenu.addItem(header("COLORS"))
+        for mode in Settings.ColorMode.allCases {
+            let item = action(mode.label, key: "", selector: #selector(setColorMode(_:)))
+            item.representedObject = mode
+            item.state = Settings.colorMode == mode ? .on : .off
+            submenu.addItem(item)
+        }
+
         submenu.addItem(.separator())
         let launch = action("Launch at Login", key: "", selector: #selector(toggleLaunchAtLogin))
         launch.state = Settings.launchAtLogin ? .on : .off
@@ -238,6 +302,26 @@ final class MenuController: NSObject, NSMenuDelegate {
         onSettingsChanged?()
     }
 
+    @objc private func toggleTitleLimit(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        Settings.titleLimitIDs = Settings.titleLimitIDs(toggling: id, in: Settings.titleLimitIDs)
+        // Same reasoning as `setColorMode`: which numbers are shown changes nothing about polling.
+        renderTitle()
+    }
+
+    @objc private func setColorMode(_ sender: NSMenuItem) {
+        guard let mode = sender.representedObject as? Settings.ColorMode else { return }
+        Settings.colorMode = mode
+        // Repaints the menu bar immediately; the dropdown picks it up on its next open, which is
+        // after this click dismisses it anyway.
+        //
+        // Deliberately *not* `onSettingsChanged` — that exists so a shortened poll interval feels
+        // immediate and a lowered alert threshold is evaluated against current usage. Neither
+        // applies to a colour, and calling it would spend a request on the usage endpoint and reset
+        // the poll phase every time someone toggled a swatch.
+        renderTitle()
+    }
+
     @objc private func toggleLaunchAtLogin() {
         Settings.launchAtLogin.toggle()
     }
@@ -250,11 +334,11 @@ final class MenuController: NSObject, NSMenuDelegate {
     /// relabels windows still finds the right one.
     private func usageRow(for window: LimitWindow) -> NSMenuItem {
         let id = window.id
-        let row = UsageRow(window)
+        let row = UsageRow(window, mode: Settings.colorMode)
         let (item, hosting) = NSMenuItem.hosting(UsageRowView(row: row), title: row.spoken)
         liveRows.append(LiveRow { [weak self] in
             guard let self, let window = self.window(id: id) else { return }
-            let row = UsageRow(window)
+            let row = UsageRow(window, mode: Settings.colorMode)
             hosting.rootView = UsageRowView(row: row)
             item.title = row.spoken
         })
@@ -295,7 +379,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     ///
     /// Registered as a live row so the age keeps counting up while the menu is held open.
     private func refreshRow() -> NSMenuItem {
-        let title = { [weak self] in "Refresh Now — updated \(Fmt.age(of: self?.lastUpdated))" }
+        let title = { [weak self] in "Refresh Now (\(Fmt.age(of: self?.lastUpdated)))" }
         let item = action(title(), key: "r", selector: #selector(refreshClicked))
         liveRows.append(LiveRow { item.title = title() })
         return item

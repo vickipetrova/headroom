@@ -16,6 +16,10 @@ struct LimitWindow: Equatable {
         case weeklyScoped
     }
 
+    static let sessionID = "session"
+    static let weeklyID = "weekly"
+    static func scopedID(model: String) -> String { "scoped:\(model)" }
+
     let kind: Kind
 
     /// Stable identity — `"session"`, `"weekly"`, `"scoped:Opus"` — and the only thing that should
@@ -31,6 +35,14 @@ struct LimitWindow: Equatable {
     let label: String
     /// Sentence-case form for notifications, e.g. "This week".
     let shortLabel: String
+
+    /// How this window is offered in the Show in Menu Bar list, e.g. "Session (5h)" or "Fable".
+    ///
+    /// Supplied by the provider like every other piece of display copy. "5h" is Claude's session
+    /// length, not the app's — a provider whose short window is an hour would otherwise get a
+    /// settings row that lies, and `MenuController` would be holding a vendor's fact, which is
+    /// exactly what it is not allowed to do.
+    let optionLabel: String
     /// Percent of the window consumed, 0–100.
     let utilization: Double
     let resetsAt: Date?
@@ -222,13 +234,21 @@ struct ClaudeProvider: UsageProvider {
     }
 
     private static func uniquelyIdentified(_ windows: [LimitWindow]) -> [LimitWindow] {
-        var seen: [String: Int] = [:]
+        var taken: Set<String> = []
         return windows.map { window in
-            let count = (seen[window.id] ?? 0) + 1
-            seen[window.id] = count
-            guard count > 1 else { return window }
-            return LimitWindow(kind: window.kind, id: "\(window.id)#\(count)",
+            // Loops rather than counting occurrences: a suffix can itself collide, because a model
+            // could genuinely be named "Opus#2" and the generated id for a second "Opus" is exactly
+            // that. Counting alone would emit the duplicate this pass exists to prevent.
+            var id = window.id
+            var suffix = 1
+            while !taken.insert(id).inserted {
+                suffix += 1
+                id = "\(window.id)#\(suffix)"
+            }
+            guard id != window.id else { return window }
+            return LimitWindow(kind: window.kind, id: id,
                                label: window.label, shortLabel: window.shortLabel,
+                               optionLabel: window.optionLabel,
                                utilization: window.utilization, resetsAt: window.resetsAt)
         }
     }
@@ -237,22 +257,24 @@ struct ClaudeProvider: UsageProvider {
     // how they label the same window.
 
     private static func sessionWindow(utilization: Double, resetsAt: Date?) -> LimitWindow {
-        LimitWindow(kind: .session, id: "session",
-                    label: "SESSION · 5-HOUR", shortLabel: "Session",
+        LimitWindow(kind: .session, id: LimitWindow.sessionID,
+                    label: "SESSION · 5-HOUR", shortLabel: "Session", optionLabel: "Session (5h)",
                     utilization: utilization, resetsAt: resetsAt)
     }
 
     private static func weeklyWindow(utilization: Double, resetsAt: Date?) -> LimitWindow {
-        LimitWindow(kind: .weekly, id: "weekly",
-                    label: "THIS WEEK · ALL MODELS", shortLabel: "This week",
+        LimitWindow(kind: .weekly, id: LimitWindow.weeklyID,
+                    label: "WEEKLY · ALL MODELS", shortLabel: "Weekly",
+                    optionLabel: "Weekly (all models)",
                     utilization: utilization, resetsAt: resetsAt)
     }
 
     private static func scopedWindow(model: String, utilization: Double,
                                      resetsAt: Date?) -> LimitWindow {
-        LimitWindow(kind: .weeklyScoped, id: "scoped:\(model)",
-                    label: "THIS WEEK · \(model.uppercased())",
-                    shortLabel: "This week (\(model))",
+        LimitWindow(kind: .weeklyScoped, id: LimitWindow.scopedID(model: model),
+                    label: "WEEKLY · \(model.uppercased())",
+                    shortLabel: "Weekly (\(model))",
+                    optionLabel: model,
                     utilization: utilization, resetsAt: resetsAt)
     }
 

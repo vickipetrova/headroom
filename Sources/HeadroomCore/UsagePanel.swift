@@ -26,12 +26,20 @@ struct UsageRow {
     /// 0...1, for the bar.
     let fraction: Double
 
+    /// Resolved here rather than in the view, so the bar's colour is covered by the same tests as
+    /// the menu bar title's and the two can't drift apart.
+    let barColor: NSColor
+
     /// The whole row as one sentence, for VoiceOver and for the menu item's `title` — which is what
     /// AppleScript reports, since a view-backed item draws no title of its own. Derived here so the
     /// two can't drift into describing the same row differently.
     var spoken: String { "\(header), \(value) used, \(trailing)" }
 
-    init(_ window: LimitWindow, now: Date = Date()) {
+    /// `mode` has no default on purpose. It used to default to `Settings.colorMode`, which made the
+    /// type read a global while its own doc claimed purity — and because Swift evaluates default
+    /// arguments at the call site, passing it explicitly changed nothing. Callers name it now.
+    init(_ window: LimitWindow, now: Date = Date(), mode: Settings.ColorMode) {
+        barColor = Fmt.color(window.utilization, mode: mode, role: .bar)
         header = window.label
         headerTrailing = window.resetsAt.map { Fmt.clock($0, from: now) } ?? ""
         value = Fmt.pct(window.utilization)
@@ -52,27 +60,32 @@ struct UsageRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
+            // `.callout` rather than `.caption` throughout the small text: caption is 10pt on macOS,
+            // which is genuinely hard to read for something you glance at. The heading additionally
+            // takes semibold and the full label colour — at secondary it read as disabled, which is
+            // the exact impression this panel was redesigned to shed.
             HStack(spacing: 8) {
                 Text(row.header)
+                    .font(.callout.weight(.semibold))
                 Spacer(minLength: 8)
                 Text(row.headerTrailing)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(row.value)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     // Monospaced digits for the same reason the menu bar title uses them: the number
                     // must not shuffle sideways as it ticks over.
                     .monospacedDigit()
                 Spacer(minLength: 8)
                 Text(row.trailing)
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
-            ProgressBar(fraction: row.fraction)
+            ProgressBar(fraction: row.fraction, color: row.barColor)
         }
         .padding(.horizontal, PanelMetrics.horizontalPadding)
         .padding(.vertical, 7)
@@ -86,6 +99,7 @@ struct UsageRowView: View {
 
 private struct ProgressBar: View {
     let fraction: Double
+    let color: NSColor
 
     var body: some View {
         // GeometryReader rather than a fixed inner width, so the fill tracks the panel width if
@@ -94,7 +108,7 @@ private struct ProgressBar: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color(nsColor: .quaternaryLabelColor))
                 Capsule()
-                    .fill(Color(nsColor: Fmt.spark))
+                    .fill(Color(nsColor: color))
                     .frame(width: max(0, geometry.size.width * fraction))
             }
         }
@@ -108,13 +122,15 @@ struct PanelTextView: View {
 
     var body: some View {
         Text(text)
-            .font(.caption)
+            .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)  // wrap instead of truncating
             // Bounded, or a long error line lays out at its natural width and drags the whole menu
-            // wider than the usage rows.
-            .frame(maxWidth: PanelMetrics.minimumWidth - PanelMetrics.horizontalPadding * 2,
-                   alignment: .leading)
+            // wider than the usage rows. Deliberately *not* derived from `minimumWidth`: that is a
+            // floor for a menu with nothing in it, and when the two were the same constant, lowering
+            // the floor silently wrapped every error message into a narrow column with dead space
+            // beside it.
+            .frame(maxWidth: PanelMetrics.textWrapWidth, alignment: .leading)
             .padding(.horizontal, PanelMetrics.horizontalPadding)
             .padding(.vertical, 5)
             .frame(minWidth: PanelMetrics.minimumWidth, maxWidth: .infinity, alignment: .leading)
@@ -122,11 +138,28 @@ struct PanelTextView: View {
 }
 
 enum PanelMetrics {
-    /// A floor, not a fixed width — see `NSMenuItem.hosting`. The menu ends up wider than this
-    /// (it adds its own chrome), and the rows stretch to match.
-    static let minimumWidth: CGFloat = 300
+    /// A floor, not a target — see `NSMenuItem.hosting`. Only wide enough that a menu showing
+    /// nothing but "Loading…" isn't a sliver; the usage rows are all wider than this on their own,
+    /// so in practice the menu sizes to its content.
+    ///
+    /// It was 300 for no reason beyond being the number picked while building the panel, and since
+    /// AppKit adds a constant 65pt of chrome that made every menu 365pt wide. Measured: the widest
+    /// row wants 240pt naturally (the weekly heading plus its reset time), so the menu now settles
+    /// at 305pt. Going below that means shortening the copy, not adjusting this.
+    static let minimumWidth: CGFloat = 200
     static let horizontalPadding: CGFloat = 14
     static let barHeight: CGFloat = 4
+
+    /// How wide message text is allowed to lay out before wrapping.
+    ///
+    /// Tracks the *measured* natural width of a usage row rather than `minimumWidth`, so a wrapped
+    /// error line ends where the rows end instead of leaving a column of dead space under full-width
+    /// separators.
+    ///
+    /// 258pt is what the widest row (the weekly heading plus its reset time) measures at the current
+    /// type sizes — it was 240 before the small text moved from `.caption` to `.callout`. Any change
+    /// to the row's fonts or copy moves this number; re-measure rather than guessing.
+    static var textWrapWidth: CGFloat { 258 - horizontalPadding * 2 }
 }
 
 // MARK: - Hosting

@@ -49,16 +49,22 @@ import Testing
         let result = try windows(Self.current)
         #expect(result[0].label == "SESSION · 5-HOUR")
         #expect(result[0].shortLabel == "Session")
-        #expect(result[1].label == "THIS WEEK · ALL MODELS")
-        #expect(result[1].shortLabel == "This week")
+        #expect(result[1].label == "WEEKLY · ALL MODELS")
+        #expect(result[1].shortLabel == "Weekly")
     }
 
     /// The reason for reading `limits[]` at all: the scoped window names its own model, so the app
     /// doesn't hardcode "Opus" and silently mislabel a different one.
     @Test func scopedLabelUsesTheReportedModelName() throws {
         let result = try windows(Self.current)
-        #expect(result[2].label == "THIS WEEK · FABLE")
-        #expect(result[2].shortLabel == "This week (Fable)")
+        #expect(result[2].label == "WEEKLY · FABLE")
+        #expect(result[2].shortLabel == "Weekly (Fable)")
+        // The Show in Menu Bar row is the provider's copy too, so a model is offered by its own
+        // name. Mutating this to a constant otherwise passes every test while every scoped row in
+        // that submenu silently reads the same.
+        #expect(result[2].optionLabel == "Fable")
+        #expect(result[0].optionLabel == "Session (5h)")
+        #expect(result[1].optionLabel == "Weekly (all models)")
     }
 
     /// Integer and fractional `percent` take different branches of `number(_:)`.
@@ -112,6 +118,23 @@ import Testing
         #expect(result.count == 2)
         #expect(Set(result.map(\.id)).count == 2)
         #expect(result.map(\.utilization) == [20, 30])
+    }
+
+    /// The nastier version: a model genuinely named "Opus#2" collides with the id the uniquifier
+    /// would *generate* for a second "Opus". Counting occurrences isn't enough — the suffix has to be
+    /// checked against what has actually been emitted, or the pass produces the duplicate it exists
+    /// to prevent, and two rows share a title checkbox, an alert marker and a set of numbers.
+    @Test func aGeneratedIdCannotCollideWithARealModelName() throws {
+        let result = try windows(#"""
+        {"limits": [
+          {"kind": "weekly_scoped", "percent": 20, "scope": {"model": {"display_name": "Opus"}}},
+          {"kind": "weekly_scoped", "percent": 30, "scope": {"model": {"display_name": "Opus"}}},
+          {"kind": "weekly_scoped", "percent": 40, "scope": {"model": {"display_name": "Opus#2"}}}
+        ]}
+        """#)
+        #expect(result.count == 3)
+        #expect(Set(result.map(\.id)).count == 3)
+        #expect(result.map(\.utilization) == [20, 30, 40])
     }
 
     /// The dropdown renders in array order, so scoped windows must always trail the two headline

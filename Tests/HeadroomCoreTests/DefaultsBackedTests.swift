@@ -72,7 +72,7 @@ struct DefaultsBacked {
 
         private func window(_ utilization: Double, id: String = "session",
                             resetsAt: Date?) -> LimitWindow {
-            LimitWindow(kind: .session, id: id, label: "SESSION · 5-HOUR", shortLabel: "Session",
+            LimitWindow(kind: .session, id: id, label: "SESSION · 5-HOUR", shortLabel: "Session", optionLabel: "opt",
                         utilization: utilization, resetsAt: resetsAt)
         }
 
@@ -159,7 +159,7 @@ struct DefaultsBacked {
             Settings.notifyThreshold = 80
             Notifier.evaluate([window(85, resetsAt: reset)], now: now)
             let restyled = LimitWindow(kind: .session, id: "session",
-                                       label: "COMPLETELY DIFFERENT HEADING", shortLabel: "Session",
+                                       label: "COMPLETELY DIFFERENT HEADING", shortLabel: "Session", optionLabel: "opt",
                                        utilization: 85, resetsAt: reset)
             Notifier.evaluate([restyled], now: now)
             #expect(recorder.count == 1)
@@ -280,6 +280,81 @@ struct DefaultsBacked {
         func outOfRangeThresholdFallsBackToTheDefault(_ stored: Int) {
             defaults.set(stored, forKey: "notifyThreshold")
             #expect(Settings.notifyThreshold == 80)
+        }
+
+        @Test func colourModeDefaultsToAlertsOnly() {
+            #expect(Settings.colorMode == .alertsOnly)
+        }
+
+        @Test(arguments: Settings.ColorMode.allCases)
+        func offeredColourModesAreKept(_ mode: Settings.ColorMode) {
+            Settings.colorMode = mode
+            #expect(Settings.colorMode == mode)
+        }
+
+        /// Same rule as the two settings above: a value we don't recognise — a hand-edited plist, or
+        /// a mode removed in a later version — falls back rather than leaving the app in a mode that
+        /// no longer exists.
+        @Test(arguments: ["", "rainbow", "System", "alertsonly"])
+        func anUnknownStoredColourModeFallsBack(_ stored: String) {
+            defaults.set(stored, forKey: "colorMode")
+            #expect(Settings.colorMode == .alertsOnly)
+        }
+
+        // MARK: - Which limits show in the menu bar
+
+        @Test func titleShowsSessionAndWeeklyByDefault() {
+            #expect(Settings.titleLimitIDs == [LimitWindow.sessionID, LimitWindow.weeklyID])
+        }
+
+        @Test func titleSelectionRoundTrips() {
+            Settings.titleLimitIDs = [LimitWindow.sessionID, "scoped:Fable"]
+            #expect(Settings.titleLimitIDs == [LimitWindow.sessionID, "scoped:Fable"])
+        }
+
+        /// Keyed by identifier, not display name — a heading restyle must not silently deselect a
+        /// limit the user chose.
+        @Test func titleSelectionIsKeyedByIdentifier() {
+            Settings.titleLimitIDs = ["scoped:Fable"]
+            let stored = defaults.array(forKey: "titleLimitIDs") as? [String]
+            #expect(stored == ["scoped:Fable"])
+            #expect(stored?.contains(where: { $0.contains("THIS WEEK") }) != true)
+        }
+
+        @Test func togglingAddsAndRemoves() {
+            let base: Set<String> = [LimitWindow.sessionID, LimitWindow.weeklyID]
+            #expect(Settings.titleLimitIDs(toggling: "scoped:Fable", in: base)
+                == [LimitWindow.sessionID, LimitWindow.weeklyID, "scoped:Fable"])
+            #expect(Settings.titleLimitIDs(toggling: LimitWindow.weeklyID, in: base)
+                == [LimitWindow.sessionID])
+        }
+
+        /// Unchecking the last one would otherwise leave a title with no numbers in it — and no
+        /// obvious way back, since the only route to this setting is through that menu.
+        @Test func unCheckingTheLastOneFallsBackToSession() {
+            #expect(Settings.titleLimitIDs(toggling: LimitWindow.weeklyID, in: [LimitWindow.weeklyID])
+                == [LimitWindow.sessionID])
+            #expect(Settings.titleLimitIDs(toggling: "scoped:Fable", in: ["scoped:Fable"])
+                == [LimitWindow.sessionID])
+            // Including unchecking session itself.
+            #expect(Settings.titleLimitIDs(toggling: LimitWindow.sessionID, in: [LimitWindow.sessionID])
+                == [LimitWindow.sessionID])
+        }
+
+        /// Defensive: a hand-edited plist holding an empty array is the same problem as unchecking
+        /// everything, and has to be caught on the way out too.
+        @Test func anEmptyStoredSelectionFallsBack() {
+            defaults.set([String](), forKey: "titleLimitIDs")
+            #expect(Settings.titleLimitIDs == [LimitWindow.sessionID])
+        }
+
+        /// A stored value of the wrong shape entirely — a hand-edited plist, or a format change in a
+        /// later version — falls back rather than crashing on the cast.
+        @Test func aWronglyTypedStoredSelectionFallsBack() {
+            defaults.set("session", forKey: "titleLimitIDs")
+            #expect(Settings.titleLimitIDs == Settings.defaultTitleLimitIDs)
+            defaults.set([1, 2], forKey: "titleLimitIDs")
+            #expect(Settings.titleLimitIDs == Settings.defaultTitleLimitIDs)
         }
 
         // `Settings.launchAtLogin` is deliberately never touched: its setter registers a real login
