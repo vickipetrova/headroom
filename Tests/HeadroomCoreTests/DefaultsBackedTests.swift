@@ -1,0 +1,245 @@
+import Foundation
+import Testing
+
+@testable import HeadroomCore
+
+/// `Notifier` and `Settings` both read a `UserDefaults` that these tests reassign, so they must not
+/// run concurrently with each other. `.serialized` is inherited by nested suites — marking each
+/// inner suite instead would still let the two of them race.
+///
+/// Setup happens in `init` and there is deliberately no `deinit`: swift-testing releases the previous
+/// suite instance while constructing the next one, so a `deinit` that restored these statics would
+/// overlap the next `init` writing them and trip Swift's exclusivity checking. Wiping the scratch
+/// domain on the way *in* gives the same isolation without the hazard, and makes a crashed run
+/// self-healing rather than leaving poisoned state for the next one.
+@Suite(.serialized)
+struct DefaultsBacked {
+    /// Never the app's real domain (`com.vickipetrova.headroom`): pointing tests at that would
+    /// clobber the developer's own refresh interval, threshold, and live alert markers.
+    static let suiteName = "com.vickipetrova.headroom.tests"
+
+    /// A named suite is not in-memory — it is flushed to ~/Library/Preferences/<name>.plist. Without
+    /// the wipe, markers would survive the run and a "first alert fires" test would pass once and
+    /// fail every time after.
+    static func scratchDefaults(clearing: Bool = true) throws -> UserDefaults {
+        _ = removeScratchPlistAtExit
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        if clearing { defaults.removePersistentDomain(forName: suiteName) }
+        return defaults
+    }
+
+    /// Registered once, the first time a scratch suite is opened, so a run doesn't leave its markers
+    /// sitting in the developer's preferences afterwards. (cfprefsd still recreates an empty
+    /// ~/Library/Preferences/<suiteName>.plist skeleton; the point is that it holds nothing.)
+    /// `atexit` rather than a `deinit`: see the note on the suite above.
+    private static let removeScratchPlistAtExit: Void = {
+        atexit { UserDefaults().removePersistentDomain(forName: DefaultsBacked.suiteName) }
+    }()
+
+    /// Collects what `evaluate` decided to send, standing in for `UNUserNotificationCenter` — which
+    /// aborts the process when there is no app bundle, as in every `swift test` run.
+    final class Recorder: @unchecked Sendable {
+        private(set) var alerts: [(label: String, threshold: Int)] = []
+        func record(_ window: LimitWindow, _ threshold: Int) {
+            alerts.append((window.label, threshold))
+        }
+        func reset() { alerts.removeAll() }
+        var count: Int { alerts.count }
+        var labels: [String] { alerts.map(\.label) }
+    }
+
+    // MARK: - Notifier
+
+    /// Alert de-duplication. The promise is "at most one per window per reset period", and both
+    /// failure modes are invisible: either the user is spammed, or they are silently never told.
+    @Suite struct NotifierTests {
+        private let defaults: UserDefaults
+        private let recorder = Recorder()
+
+        init() throws {
+            defaults = try DefaultsBacked.scratchDefaults()
+            Settings.defaults = defaults
+            Notifier.defaults = defaults
+            let recorder = self.recorder
+            Notifier.deliver = { recorder.record($0, $1) }
+        }
+
+        private let reset = Date(timeIntervalSince1970: 1_785_688_799)
+        private let now = Date(timeIntervalSince1970: 1_785_600_000)
+        private let sessionKey = "notified.SESSION (5-hour window)"
+
+        private func window(_ utilization: Double, label: String = "SESSION (5-hour window)",
+                            resetsAt: Date?) -> LimitWindow {
+            LimitWindow(kind: .session, label: label, shortLabel: "Session",
+                        utilization: utilization, resetsAt: resetsAt)
+        }
+
+        @Test func crossingTheThresholdAlertsOnce() {
+            Settings.notifyThreshold = 80
+            Notifier.evaluate([window(85, resetsAt: reset)], now: now)
+            #expect(recorder.count == 1)
+            #expect(recorder.alerts.first?.threshold == 80)
+            #expect(defaults.string(forKey: sessionKey) != nil)
+        }
+
+        @Test func pollingAgainWithTheSameDataStaysQuiet() {
+            Settings.notifyThreshold = 80
+            let windows = [window(85, resetsAt: reset)]
+            Notifier.evaluate(windows, now: now)
+            Notifier.evaluate(windows, now: now)
+            Notifier.evaluate(windows, now: now)
+            #expect(recorder.count == 1)
+        }
+
+        /// The entire reason the marker is persisted rather than held in memory.
+        @Test func markerSurvivesARelaunch() throws {
+            Settings.notifyThreshold = 80
+            Notifier.evaluate([window(85, resetsAt: reset)], now: now)
+            recorder.reset()
+
+            // A fresh process reading what the previous one stored.
+            Notifier.defaults = try DefaultsBacked.scratchDefaults(clearing: false)
+            Notifier.evaluate([window(87, resetsAt: reset)], now: now)
+            #expect(recorder.count == 0)
+        }
+
+        @Test func aNewResetPeriodAlertsAgain() {
+            Settings.notifyThreshold = 80
+            Notifier.evaluate([window(85, resetsAt: reset)], now: now)
+            Notifier.evaluate([window(85, resetsAt: reset.addingTimeInterval(18_000))], now: now)
+            #expect(recorder.count == 2)
+        }
+
+        @Test func belowThresholdSaysNothingAndRecordsNothing() {
+            Settings.notifyThreshold = 80
+            Notifier.evaluate([window(42, resetsAt: reset)], now: now)
+            #expect(recorder.count == 0)
+            #expect(defaults.string(forKey: sessionKey) == nil)
+        }
+
+        @Test func thresholdOffSaysNothing() {
+            Settings.notifyThreshold = 0
+            Notifier.evaluate([window(99, resetsAt: reset)], now: now)
+            #expect(recorder.count == 0)
+        }
+
+        @Test func exactlyAtTheThresholdAlerts() {
+            Settings.notifyThreshold = 80
+            Notifier.evaluate([window(80, resetsAt: reset)], now: now)
+            #expect(recorder.count == 1)
+        }
+
+        /// Regression: the menu bar rounds, so 79.6% displays as "80%". An 80% alert that stayed
+        /// silent while the title read 80% looks broken.
+        @Test func alertMatchesTheDisplayedPercentage() {
+            Settings.notifyThreshold = 80
+            Notifier.evaluate([window(79.6, resetsAt: reset)], now: now)
+            #expect(Fmt.pct(79.6) == "80%")
+            #expect(recorder.count == 1)
+        }
+
+        @Test func windowsAreTrackedIndependently() {
+            Settings.notifyThreshold = 80
+            Notifier.evaluate([
+                window(85, label: "SESSION (5-hour window)", resetsAt: reset),
+                window(90, label: "THIS WEEK (all models)", resetsAt: reset),
+                window(10, label: "THIS WEEK (Opus)", resetsAt: reset),
+            ], now: now)
+            #expect(recorder.labels == ["SESSION (5-hour window)", "THIS WEEK (all models)"])
+        }
+
+        /// Lowering the threshold is a crossing the user just asked to hear about.
+        @Test func loweringTheThresholdAlertsAgain() {
+            Settings.notifyThreshold = 80
+            Notifier.evaluate([window(85, resetsAt: reset)], now: now)
+            Settings.notifyThreshold = 50
+            Notifier.evaluate([window(85, resetsAt: reset)], now: now)
+            #expect(recorder.count == 2)
+        }
+
+        /// Regression: raising it back is not a new crossing. Changing any setting re-polls and
+        /// re-evaluates, so comparing thresholds by inequality meant idle clicks in the Settings
+        /// submenu produced a fresh alert every time.
+        @Test func raisingTheThresholdBackDoesNotAlertAgain() {
+            Settings.notifyThreshold = 80
+            Notifier.evaluate([window(85, resetsAt: reset)], now: now)
+            Settings.notifyThreshold = 50
+            Notifier.evaluate([window(85, resetsAt: reset)], now: now)
+            recorder.reset()
+
+            Settings.notifyThreshold = 80
+            Notifier.evaluate([window(85, resetsAt: reset)], now: now)
+            Settings.notifyThreshold = 90
+            Notifier.evaluate([window(95, resetsAt: reset)], now: now)
+            #expect(recorder.count == 0)
+        }
+
+        /// Regression: with no reset time the marker used to be a constant, so a window was
+        /// announced once and then stayed silent forever, across relaunches. It should still be once
+        /// per period — falling back to the day when the endpoint won't say.
+        @Test func windowWithNoResetTimeAlertsOncePerDay() {
+            Settings.notifyThreshold = 80
+            Notifier.evaluate([window(85, resetsAt: nil)], now: now)
+            Notifier.evaluate([window(85, resetsAt: nil)], now: now)
+            #expect(recorder.count == 1)
+
+            Notifier.evaluate([window(85, resetsAt: nil)], now: now.addingTimeInterval(86_400 * 2))
+            #expect(recorder.count == 2)
+        }
+    }
+
+    // MARK: - Settings
+
+    @Suite struct SettingsTests {
+        private let defaults: UserDefaults
+
+        init() throws {
+            defaults = try DefaultsBacked.scratchDefaults()
+            Settings.defaults = defaults
+        }
+
+        @Test func unsetPreferencesUseTheDocumentedDefaults() {
+            #expect(Settings.refreshMinutes == 5)
+            #expect(Settings.notifyThreshold == 80)
+            #expect(Settings.refreshInterval == 300)
+        }
+
+        /// A hand-edited plist must not be able to leave the app polling every zero seconds.
+        @Test(arguments: [0, 3, -1, 999])
+        func outOfRangeRefreshFallsBackToTheDefault(_ stored: Int) {
+            defaults.set(stored, forKey: "refreshMinutes")
+            #expect(Settings.refreshMinutes == 5)
+        }
+
+        @Test(arguments: [1, 5, 15])
+        func offeredRefreshValuesAreKept(_ stored: Int) {
+            Settings.refreshMinutes = stored
+            #expect(Settings.refreshMinutes == stored)
+            #expect(Settings.refreshInterval == TimeInterval(stored * 60))
+        }
+
+        /// The highest-value assertion in this file. "Off" is stored as 0, which is also what
+        /// `UserDefaults.integer(forKey:)` returns for a missing key — so the getter has to probe for
+        /// the key's existence separately. Collapse that and alerts silently switch back on for
+        /// everyone who turned them off.
+        @Test func offIsPersistedAndNotMistakenForUnset() {
+            Settings.notifyThreshold = 0
+            #expect(Settings.notifyThreshold == 0)
+        }
+
+        @Test(arguments: [50, 80, 90])
+        func offeredThresholdsAreKept(_ stored: Int) {
+            Settings.notifyThreshold = stored
+            #expect(Settings.notifyThreshold == stored)
+        }
+
+        @Test(arguments: [42, -1, 100])
+        func outOfRangeThresholdFallsBackToTheDefault(_ stored: Int) {
+            defaults.set(stored, forKey: "notifyThreshold")
+            #expect(Settings.notifyThreshold == 80)
+        }
+
+        // `Settings.launchAtLogin` is deliberately never touched: its setter registers a real login
+        // item with macOS, which from a test process would point at the test binary.
+    }
+}

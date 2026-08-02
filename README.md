@@ -57,8 +57,12 @@ cp -R build/Headroom.app /Applications/
 open /Applications/Headroom.app
 ```
 
-That's the whole toolchain: `swiftc` and the Xcode Command Line Tools. No Xcode project, no
-package manager, no dependencies.
+That's the whole toolchain: the Xcode Command Line Tools. No Xcode project, no third-party
+dependencies. Tests run with `swift test`.
+
+`swift run` won't work, and that's expected — it produces a bare binary with no `Info.plist`, so
+there's no `LSUIElement`, no bundle identity for login items, and no notification registration.
+`./build.sh && open build/Headroom.app` is the way to run it.
 
 ### DMG
 
@@ -86,11 +90,9 @@ Everything lives in the dropdown under **Settings**:
 Alerts fire at most once per window per reset period, so sitting at 85% doesn't produce an alert on
 every poll. Lowering the threshold mid-window counts as a new crossing and will alert again.
 
-> [!IMPORTANT]
-> **Alerts need a signed build.** Recent macOS refuses notification registration for ad-hoc signed
-> apps, which is what `./build.sh` produces. If you built from source, the menu will show
-> *"Alerts blocked — open Notification settings"* and no alerts will arrive. Everything else works
-> normally. Signed releases are not subject to this.
+macOS asks for notification permission the first time Headroom runs with alerts switched on. If you
+decline — or later switch Headroom off in System Settings › Notifications — the menu says
+*"Alerts blocked — open Notification settings"* rather than silently never alerting you.
 
 ## Roadmap
 

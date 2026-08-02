@@ -1,6 +1,7 @@
 #!/bin/bash
 # Builds build/Headroom.app (and optionally build/Headroom.dmg with: ./build.sh --dmg).
-# Requires the Xcode Command Line Tools (xcode-select --install). No Xcode project, no dependencies.
+# Requires the Xcode Command Line Tools (xcode-select --install). No Xcode project, no third-party
+# dependencies. Compilation goes through SwiftPM so `swift test` works on the same sources.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -16,15 +17,29 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 echo "Compiling universal binary (arm64 + x86_64)…"
-# Universal so it runs natively on Apple Silicon and Intel without Rosetta. swiftc emits one arch
-# per -target, so this is two compiles joined by lipo. Keep the deployment target pinned: otherwise
-# swiftc stamps the binary with the build machine's OS and it refuses to launch on older systems
-# despite LSMinimumSystemVersion.
-FRAMEWORKS=(-framework Cocoa -framework UserNotifications -framework ServiceManagement)
-swiftc -O -target "arm64-apple-macos$MIN_MACOS"  Sources/*.swift -o "$BIN.arm64"  "${FRAMEWORKS[@]}"
-swiftc -O -target "x86_64-apple-macos$MIN_MACOS" Sources/*.swift -o "$BIN.x86_64" "${FRAMEWORKS[@]}"
-lipo -create "$BIN.arm64" "$BIN.x86_64" -output "$BIN"
-rm -f "$BIN.arm64" "$BIN.x86_64"
+# Universal so it runs natively on Apple Silicon and Intel without Rosetta. SwiftPM builds one arch
+# per invocation, so this is two builds joined by lipo.
+#
+# --triple twice rather than `--arch arm64 --arch x86_64`: passing --arch more than once silently
+# switches SwiftPM to the XCBuild backend, which lives inside Xcode.app and does not exist under the
+# Command Line Tools. That would break the build for CLT-only contributors while still passing in CI.
+#
+# -debug-info-format none because `swift build -c release` compiles with -g by default, and the
+# resulting debug map embeds absolute paths from this machine's .build directory into the shipped
+# binary.
+#
+# The deployment target comes from `platforms:` in Package.swift, not from the triple — SwiftPM
+# rewrites the version component on Darwin, so the build machine's OS cannot leak in.
+SPM_FLAGS=(-c release -debug-info-format none)
+SLICES=()
+for TRIPLE in arm64-apple-macosx x86_64-apple-macosx; do
+  swift build "${SPM_FLAGS[@]}" --triple "$TRIPLE"
+  # Ask SwiftPM where it put things rather than hardcoding a path. Note .build/release is a
+  # compatibility symlink pointing at whichever triple built last — using it would lipo one slice
+  # with itself. The flags must match the build exactly, hence the shared array.
+  SLICES+=("$(swift build "${SPM_FLAGS[@]}" --triple "$TRIPLE" --show-bin-path)/$APP_NAME")
+done
+lipo -create "${SLICES[@]}" -output "$BIN"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

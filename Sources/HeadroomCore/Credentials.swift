@@ -46,7 +46,10 @@ enum Credentials {
     /// The Keychain item and the file both hold `{"claudeAiOauth": {"accessToken": "..."}}`.
     /// Older and hand-made setups sometimes store the bare token instead, so fall back to
     /// treating the payload as the token itself.
-    private static func token(in data: Data) -> String? {
+    ///
+    /// Internal rather than private so tests can exercise it with synthetic bytes. It is the only
+    /// part of this file a test may touch — everything above it reads the real login.
+    static func token(in data: Data) -> String? {
         if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let oauth = object["claudeAiOauth"] as? [String: Any],
            let token = oauth["accessToken"] as? String,

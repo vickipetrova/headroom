@@ -10,7 +10,8 @@ enum Settings {
     /// Utilization percentage that triggers an alert. 0 means never.
     static let thresholdOptions = [0, 50, 80, 90]
 
-    private static let defaults = UserDefaults.standard
+    /// Reassigned only by tests, which point it at a scratch suite rather than the real preferences.
+    static var defaults = UserDefaults.standard
 
     private enum Key {
         static let refreshMinutes = "refreshMinutes"

@@ -1,14 +1,23 @@
 import AppKit
 
 /// Wiring: a provider, a menu, and two timers.
-final class AppDelegate: NSObject, NSApplicationDelegate {
+///
+/// The only public symbol in HeadroomCore. `Sources/Headroom/main.swift` holds nothing but the
+/// top-level code that constructs this and starts the run loop — top-level code can't live in a
+/// library target, and keeping everything else `internal` means the test target reaches it with
+/// `@testable` instead of the module needing a public API.
+public final class AppDelegate: NSObject, NSApplicationDelegate {
+    // A synthesized initializer on a public class is internal, so this has to be spelled out for
+    // `AppDelegate()` to compile from the executable target.
+    public override init() { super.init() }
+
     private let provider: UsageProvider = ClaudeProvider()
     private let menuController = MenuController()
 
     private var pollTimer: Timer?
     private var tickTimer: Timer?
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)  // Menu bar only, no dock icon, no window.
 
         menuController.onRefresh = { [weak self] in self?.refresh() }
@@ -64,8 +73,3 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return timer
     }
 }
-
-let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()

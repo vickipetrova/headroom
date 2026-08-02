@@ -6,8 +6,8 @@ import Foundation
 ///
 /// `label` is whatever the provider wants shown as that window's heading, so a future provider
 /// can say "TODAY" or "THIS MONTH" without MenuController learning anything about it.
-struct LimitWindow {
-    enum Kind {
+struct LimitWindow: Equatable {
+    enum Kind: Equatable {
         /// The short rolling window (Claude Code: 5 hours).
         case session
         /// The long window, across everything.
@@ -121,7 +121,14 @@ struct ClaudeProvider: UsageProvider {
 
         // Preferred shape: a `limits` array, which generalizes the old Opus-specific weekly key
         // into `weekly_scoped` entries that name their own model.
-        for entry in (object["limits"] as? [[String: Any]]) ?? [] {
+        //
+        // Cast to [Any] and filter, not to [[String: Any]]. A conditional cast to an array of a
+        // concrete element type checks every element and yields nil if a single one fails — so one
+        // unrecognized entry would discard the whole array rather than itself, which is exactly the
+        // "drops that row" rule inverted. Adding one entry shape is the most likely way this endpoint
+        // drifts next.
+        let limits = (object["limits"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
+        for entry in limits {
             guard let kind = entry["kind"] as? String,
                   let utilization = number(entry["percent"])
             else { continue }
@@ -183,14 +190,41 @@ struct ClaudeProvider: UsageProvider {
     }
 
     /// `percent` and `utilization` have both been seen as Int and as Double.
+    ///
+    /// The finite check and the clamp are not paranoia: `Fmt.pct` does `Int(value.rounded())`, and
+    /// converting a Double to Int traps on NaN, infinity, or anything past Int's range. A single
+    /// `{"percent": 1e30}` — or `1e999`, which JSON parses to +infinity — would crash the menu bar
+    /// rather than dropping a row.
     private static func number(_ any: Any?) -> Double? {
-        if let double = any as? Double { return double }
-        if let int = any as? Int { return Double(int) }
-        return nil
+        guard let any, !isBoolean(any) else { return nil }
+        let value: Double
+        if let double = any as? Double { value = double }
+        else if let int = any as? Int { value = Double(int) }
+        else { return nil }
+        guard value.isFinite else { return nil }
+        // Clamped rather than rejected: a plan reporting 105% is over its limit, and saying "100%"
+        // is far more useful than dropping the row exactly when it matters most.
+        return min(max(value, 0), 100)
+    }
+
+    /// Timestamps outside this range are junk, and a wild one would overflow the `Int` conversion in
+    /// `Fmt.countdown`. Roughly 1970±200 years.
+    private static let plausibleEpochRange = -6_311_433_600.0...6_311_433_600.0
+
+    /// `JSONSerialization` turns `true`/`false` into `NSNumber`s, and `NSNumber as? Double` happily
+    /// yields 1.0 and 0.0 — so without this check `{"percent": true}` reads as 1% and
+    /// `{"resets_at": false}` as 1 January 1970. Comparing the CoreFoundation type id is the only
+    /// reliable discriminator: `as? Bool` is no good, because `NSNumber(42) as? Bool` also succeeds.
+    private static func isBoolean(_ any: Any) -> Bool {
+        CFGetTypeID(any as CFTypeRef) == CFBooleanGetTypeID()
     }
 
     private static func date(_ any: Any?) -> Date? {
-        if let seconds = any as? Double { return Date(timeIntervalSince1970: seconds) }
+        guard let any, !isBoolean(any) else { return nil }
+        if let seconds = any as? Double {
+            guard seconds.isFinite, plausibleEpochRange.contains(seconds) else { return nil }
+            return Date(timeIntervalSince1970: seconds)
+        }
         guard let string = any as? String else { return nil }
         // Timestamps currently arrive as "2026-08-02T16:39:59.408408+00:00". The fractional-seconds
         // parser is required for those and returns nil without them, so both are needed.

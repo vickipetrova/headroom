@@ -8,10 +8,14 @@ the goal is to keep it small enough that one person can read the whole thing in 
 macOS 13+ and the Xcode Command Line Tools (`xcode-select --install`). Nothing else.
 
 ```bash
-./build.sh          # -> build/Headroom.app
-./build.sh --dmg    # also -> build/Headroom.dmg
+swift test --disable-xctest   # run the suite first, it takes ~0.05s
+./build.sh                    # -> build/Headroom.app
+./build.sh --dmg              # also -> build/Headroom.dmg
 open build/Headroom.app
 ```
+
+`swift run` won't work — it makes a bare binary with no `Info.plist`, so there's no menu-bar-only
+mode, no login-item identity, and no notifications. Use `./build.sh && open build/Headroom.app`.
 
 Build from the latest `main` so you're not fixing something that already changed.
 
@@ -25,14 +29,16 @@ existing `UsageProvider` protocol.
 ## What won't be merged
 
 - **New dependencies.** AppKit, Foundation, Security, UserNotifications, ServiceManagement. The
-  zero-dependency, `swiftc`-only build is a feature, not an accident.
+  zero-dependency build is a feature, not an accident — `Package.swift` has no `dependencies:` array
+  and shouldn't grow one, for tests either.
 - **Anything that logs, caches, or writes the OAuth token.** See below.
 - **A second network destination.** No analytics, no telemetry, no update checks, no crash
   reporting. One request, to `api.anthropic.com`.
 - **Cost dashboards, historical databases, spend estimation.** Other projects do this well and the
   README links them.
 - **Anything requiring an API key or costing money to run.**
-- **An Xcode project.** It would make `build.sh` a lie.
+- **An Xcode project.** `Package.swift` plus `build.sh` is the whole build; an `.xcodeproj` would be
+  a second source of truth to keep in sync.
 
 ## Ground rules for code
 
@@ -50,7 +56,20 @@ your real credentials — useful whether or not you use Claude Code.
 
 ## Testing
 
-Run it. "Builds clean" isn't testing.
+`swift test --disable-xctest` must pass, and behaviour changes need a test. The suite is small and
+fast; if your change isn't covered by one, that's usually a sign it's worth adding rather than a sign
+testing is hard.
+
+Two conventions worth knowing before you add tests:
+
+- **swift-testing, not XCTest.** The Command Line Tools ship `Testing.framework` but *not*
+  `XCTest.framework`, so an `import XCTest` compiles for anyone with full Xcode while being
+  unrunnable for everyone else. `--disable-xctest` in CI is what keeps that honest.
+- **Some APIs are off-limits to tests** — anything reading the real Keychain, registering a login
+  item, hitting the network, or constructing `MenuController`. CI greps for them, and `CLAUDE.md`
+  explains each.
+
+Then run it. "Builds clean" isn't testing, and neither is "tests pass" for anything you can see.
 
 For anything visual, attach a screenshot of the menu bar title and the open dropdown. Say which
 macOS version and which Mac (Apple Silicon or Intel). If you changed parsing, say what you fed it.

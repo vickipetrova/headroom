@@ -33,11 +33,37 @@ First release.
 - `./build.sh` produces a universal (arm64 + x86_64) ad-hoc signed bundle with no Xcode project and
   no third-party dependencies; `--dmg` packages an installer image.
 
+- **Tests.** `swift test` covers endpoint parsing, formatting, alert de-duplication, preference
+  validation, and credential parsing. The project builds through SwiftPM (`Package.swift`, no
+  third-party dependencies); `build.sh` still produces the universal, ad-hoc-signed `.app`.
+
+### Fixed
+
+Found while building the test suite, before first release:
+
+- **A single unrecognized entry in the endpoint's `limits` array discarded every other entry.**
+  Casting to an array of a concrete element type checks all elements and yields nothing if one
+  fails — so one new field shape would have emptied the whole menu instead of dropping one row.
+  This was the likeliest way a real endpoint change would have broken the app.
+- **A JSON boolean was read as a number.** `{"percent": true}` showed as 1%, and
+  `{"resets_at": false}` as 1 January 1970, because booleans bridge to `NSNumber` and satisfy
+  `as? Double`.
+- **A huge or non-finite percentage crashed the menu bar.** Converting to `Int` for display traps on
+  infinity or anything past `Int`'s range; values are now clamped and checked.
+- **Raising the alert threshold re-fired an alert already delivered.** Since changing any setting
+  re-polls, clicking around the Settings submenu could produce the same alert several times. Lowering
+  the threshold still alerts, as intended.
+- **A limit window with no reset time was announced once and then never again**, across relaunches,
+  instead of once per period.
+- **79.6% displayed as "80%" but didn't trigger the 80% alert.** The alert now compares the same
+  rounded number the menu bar shows.
+- **The clock and the countdown disagreed at exactly 24 hours**, so the dropdown could read
+  "Resets 9:00 AM — in 1d 0h" without the weekday that removes the ambiguity.
+- **Reset times kept their old format after a system locale change**, because the date formatters
+  were built once at launch.
+
 ### Known limitations
 
-- Threshold alerts require a signed build. macOS refuses notification registration for the ad-hoc
-  signed bundle `./build.sh` produces; the menu shows "Alerts blocked" in that case rather than
-  silently never alerting.
 - Pro and Max plans only. Metered API-key accounts have no session or weekly quota, and Headroom
   says so instead of showing zeroes.
 

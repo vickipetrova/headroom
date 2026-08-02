@@ -76,7 +76,5 @@ section as the release notes, and publish.
 
 ## Why notarization matters here
 
-Beyond the Gatekeeper warning: recent macOS refuses to register ad-hoc signed apps for
-notifications, so threshold alerts do not work in builds from source. A properly signed release
-fixes that for everyone who installs the DMG. Build-from-source users see an "Alerts blocked" row
-in the menu explaining why.
+Without it, a downloaded DMG trips Gatekeeper and users have to right-click › Open the first time —
+which, for an app that asks to read their Claude credentials, is exactly the wrong first impression.

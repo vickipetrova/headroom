@@ -11,6 +11,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # --disable-xctest enforces the project's toolchain contract. The Command Line Tools ship
+      # Testing.framework but not XCTest.framework, so an `import XCTest` would compile here (the
+      # runner has full Xcode) while being unrunnable for anyone building with CLT alone.
+      - name: Test
+        run: swift test --disable-xctest
+
       - name: Build
         run: ./build.sh
 
@@ -23,6 +29,12 @@ jobs:
           # Must be a universal binary — a single-arch slice means the lipo step silently regressed.
           lipo -info "$BIN" | tee /dev/stderr | grep -q "arm64"
           lipo -info "$BIN" | grep -q "x86_64"
+          # `platforms:` in Package.swift is the only thing pinning the deployment target now, and a
+          # typo there ships a macOS 10.13 binary that would pass every check above.
+          test "$(otool -l "$BIN" | grep -c 'minos 13.0')" -eq 2
+          # `swift build -c release` compiles with -g by default; without -debug-info-format none the
+          # binary carries a debug map full of absolute paths from the build machine.
+          test "$(nm -a "$BIN" | grep -c OSO)" -eq 0
 
       - name: Check nothing logs the token
         run: |
@@ -30,7 +42,7 @@ jobs:
           # Cheap guard against the one mistake that actually matters here: flag any print/NSLog
           # whose argument mentions a token. Comment lines are excluded — the files that handle the
           # token describe in prose that they never log it, and that prose is not a violation.
-          hits="$(grep -rnE '(print|NSLog|debugPrint|os_log|FileHandle\.standardError)[^\n]*[Tt]oken' Sources/ \
+          hits="$(grep -rnE '(print|NSLog|debugPrint|os_log|FileHandle\.standardError)[^\n]*[Tt]oken' Sources/ Tests/ \
                   | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*)' || true)"
           if [ -n "$hits" ]; then
             echo "$hits"
@@ -38,3 +50,17 @@ jobs:
             exit 1
           fi
           echo "OK — no token logging found."
+
+      - name: Check tests touch nothing they shouldn't
+        run: |
+          set -euo pipefail
+          # These reach the developer's real login, their real login items, the network, or the
+          # window server. See "Never called from a test" in CLAUDE.md for why each is here.
+          hits="$(grep -rnE 'MenuController\(|AppDelegate\(|accessToken\(|launchAtLogin|UNUserNotificationCenter|ClaudeProvider\(\)\.fetch' Tests/ \
+                  | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|///)' || true)"
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::A test references an API that reads real credentials, registers a login item, hits the network, or needs a GUI session."
+            exit 1
+          fi
+          echo "OK — tests stay in bounds."
