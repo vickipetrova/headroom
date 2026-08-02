@@ -196,8 +196,12 @@ final class MenuController: NSObject, NSMenuDelegate {
                 menu.addItem(textRow { "Loading…" })
             }
         } else {
-            for (index, window) in windows.enumerated() {
-                if index > 0 { menu.addItem(.separator()) }
+            // No rules between the usage rows. Each row already reads as a unit — a semibold heading
+            // over a large percentage over a bar — so whitespace is enough to group them, and a line
+            // between every one made three sections look like three unrelated panels stacked up.
+            // Separators still earn their place below, where they divide *kinds* of thing: data from
+            // an error, data from the commands.
+            for window in windows {
                 menu.addItem(usageRow(for: window))
             }
             if lastError != nil {
