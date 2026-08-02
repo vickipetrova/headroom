@@ -76,30 +76,46 @@ ICON_NAME_KEY=""
 
 # Tier 1: the classic .icns, from sips and iconutil, both of which are in /usr/bin.
 #
-# The inset is the part that is not obvious. `assets/icon-1024.png` is an Icon Composer export, and
-# those are full-bleed by design — measured, its squircle touches all four canvas edges (alpha 255 at
-# the top edge centre, 0 only in the corners) because on macOS 26 the system supplies the mask and the
-# shadow. Downscaling that straight into an iconset is the recipe everyone reaches for and it is
-# wrong: the art fills the whole tile, so the icon renders about a quarter larger than every other app
-# in Finder. Apple's grid puts the shape in 824 of 1024 with the rest as margin, which is also what
-# actool's own render of this artwork does. So scale to 824 and pad back out to 1024 first; sips pads
-# with transparency, verified, so no compositing tool is needed.
+# `assets/icon-1024.png` is a committed render of the Icon Composer document, produced by
+# `assets/render-icon.sh` — so it already sits on Apple's 824-of-1024 grid, with the shadow, and it is
+# only downscaled here. Do not add an inset step: it is already inset, and doing it twice makes the
+# icon visibly small. Re-run render-icon.sh, don't compensate in this file.
 #
-# Every size is then downscaled from that one inset master rather than inset individually, which is
-# what keeps the margin proportional at 16px as well as at 1024.
+# Guarded rather than trusted, because `sips` exits 0 when its input does not exist — it only prints a
+# warning — so without this a missing or unreadable source silently reuses whatever the previous build
+# left behind, and ships the wrong icon under a green build.
 echo "Rendering the app icon…"
+# The source is validated up front, because sips reports success on inputs it did not really read:
+# it exits 0 when the file does not exist at all (printing only a warning), and exits 0 on a truncated
+# PNG, rendering whatever partial data it got at the requested size. Neither shows up in an exit
+# status or in the output's dimensions, so a corrupt source would sail through and ship a broken icon
+# under a green build.
+[[ -f "$ICON_PNG" ]] || { echo "error: $ICON_PNG is missing. Run ./assets/render-icon.sh." >&2; exit 1; }
+# Every valid PNG ends with the same 12-byte IEND chunk, whose last 8 bytes — the type and its CRC
+# over zero-length data — are this constant. Truncation is what this catches, and nothing else does.
+[[ "$(tail -c 8 "$ICON_PNG" | xxd -p)" == "49454e44ae426082" ]] \
+  || { echo "error: $ICON_PNG is truncated or not a PNG. Re-run ./assets/render-icon.sh." >&2; exit 1; }
+[[ "$(sips -g pixelWidth "$ICON_PNG" | tail -1 | awk '{print $2}')" == "1024" ]] \
+  || { echo "error: $ICON_PNG must be 1024x1024." >&2; exit 1; }
 rm -rf "$ICONSET"
 mkdir -p "$ICONSET"
-sips -z 824 824 "$ICON_PNG" --out "build/icon-art.png" >/dev/null
-sips --padToHeightWidth 1024 1024 "build/icon-art.png" --out "build/icon-master.png" >/dev/null
-# Deliberately `set --` on an unquoted word: this file is bash, where that word-splits. It does not
-# split under zsh, so this loop silently produces one file named ".png" if you paste it into a shell.
-for SPEC in "16 icon_16x16" "32 icon_16x16@2x" "32 icon_32x32" "64 icon_32x32@2x" \
-            "128 icon_128x128" "256 icon_128x128@2x" "256 icon_256x256" "512 icon_256x256@2x" \
-            "512 icon_512x512" "1024 icon_512x512@2x"; do
-  set -- $SPEC
-  sips -z "$1" "$1" "build/icon-master.png" --out "$ICONSET/$2.png" >/dev/null
-done
+# IFS-read rather than `set --`: this splits without clobbering the script's own positional
+# parameters, and without depending on the shell being bash for word splitting (it does not split
+# under zsh, which silently yields a single file named ".png").
+while read -r SIZE NAME; do
+  sips -z "$SIZE" "$SIZE" "$ICON_PNG" --out "$ICONSET/$NAME.png" >/dev/null
+done <<'SIZES'
+16 icon_16x16
+32 icon_16x16@2x
+32 icon_32x32
+64 icon_32x32@2x
+128 icon_128x128
+256 icon_128x128@2x
+256 icon_256x256
+512 icon_256x256@2x
+512 icon_512x512
+1024 icon_512x512@2x
+SIZES
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/$APP_NAME.icns"
 
 # Tier 2: the layered Icon Composer document, so macOS 26 and later can render it with the material
@@ -110,26 +126,36 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/$APP_NAME.icns"
 # It compiles into a staging directory and only Assets.car is taken. actool also writes its own
 # Headroom.icns, and compiling straight into Contents/Resources would overwrite the complete one built
 # above with a four-size subset: --standalone-icon-behavior does not turn that output off, only
-# resizes it. Its render is arguably the nicer of the two — Apple's renderer, working from the layered
-# source, and it bakes in a drop shadow this one has no way to reproduce — but taking it would make
-# the bundle differ by build machine, which is the one thing this tier boundary exists to prevent.
+# resizes it. Taking actool's instead would also make the bundle differ by build machine, which is the
+# one thing this tier boundary exists to prevent — its Assets.car is not even reproducible between two
+# runs on one machine, since it embeds a fresh timestamp and fresh rendition UUIDs each time.
 if ACTOOL="$(xcrun --find actool 2>/dev/null)"; then
   ICON_STAGE="build/icon-actool"
   rm -rf "$ICON_STAGE"
   mkdir -p "$ICON_STAGE"
   # Not fatal. A future actool that rejects this document must cost the layered icon, not the build.
-  if "$ACTOOL" "$ICON_DOC" \
-       --compile "$ICON_STAGE" \
-       --platform macosx \
-       --minimum-deployment-target "$MIN_MACOS" \
-       --app-icon "$APP_NAME" \
-       --output-partial-info-plist "$ICON_STAGE/partial.plist" \
-       --errors --warnings --notices >/dev/null 2>&1 && [[ -f "$ICON_STAGE/Assets.car" ]]; then
+  # Diagnostics go to a log rather than /dev/null: actool exits 0 even when it renders nothing, so
+  # without keeping them the --errors/--warnings/--notices flags would be decorative and a failure
+  # would carry no cause.
+  "$ACTOOL" "$ICON_DOC" \
+    --compile "$ICON_STAGE" \
+    --platform macosx \
+    --minimum-deployment-target "$MIN_MACOS" \
+    --app-icon "$APP_NAME" \
+    --output-partial-info-plist "$ICON_STAGE/partial.plist" \
+    --errors --warnings --notices > "$ICON_STAGE/actool.log" 2>&1 || true
+  # The partial plist, not the presence of Assets.car, is the signal that an app icon was actually
+  # selected and compiled. actool writes an Assets.car regardless — if --app-icon names an asset the
+  # document does not contain (rename Headroom.icon, or change APP_NAME, and it will), it exits 0 with
+  # a car full of layers, no icon in it, and an empty partial plist. Guarding on the file would pass
+  # there and set CFBundleIconName pointing at nothing.
+  if ICON_NAME="$(plutil -extract CFBundleIconName raw "$ICON_STAGE/partial.plist" 2>/dev/null)"; then
     cp "$ICON_STAGE/Assets.car" "$APP/Contents/Resources/"
-    ICON_NAME_KEY="  <key>CFBundleIconName</key><string>$APP_NAME</string>"
+    ICON_NAME_KEY="  <key>CFBundleIconName</key><string>$ICON_NAME</string>"
     echo "Compiled the layered icon for macOS 26+ (Assets.car)."
   else
-    echo "warning: actool could not compile $ICON_DOC — shipping the .icns only." >&2
+    echo "warning: actool produced no app icon from $ICON_DOC — shipping the .icns only." >&2
+    echo "         see $ICON_STAGE/actool.log" >&2
   fi
 fi
 
@@ -193,10 +219,37 @@ if [[ "$MODE" == "--dmg" || "$MODE" == "--dmg-only" ]]; then
   cp -R "$APP" "$STAGE/"
   ln -s /Applications "$STAGE/Applications"
 
-  # Build straight from the folder rather than laying out a mounted read-write image: macOS's
-  # fseventsd creates a hidden .fseventsd on any writable volume, and deleting it does not stick
-  # (the deletion is itself an event, which recreates it). No mount, no stray hidden folders.
-  hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+  # Volume icon, so the window the user drags from shows Headroom rather than a generic white disk.
+  # Two things are required and neither works alone: a file named `.VolumeIcon.icns` at the volume
+  # root, *and* Finder's custom-icon flag on the root itself.
+  #
+  # The flag is why this is not a one-liner. `SetFile -a C` on the staging folder does set it there —
+  # measured — but `hdiutil create -srcfolder` builds a fresh filesystem and does not carry the source
+  # folder's FinderInfo onto the volume root, so the flag is silently lost and the icns sits there
+  # doing nothing. It has to be set on the mounted volume instead.
+  cp "$APP/Contents/Resources/$APP_NAME.icns" "$STAGE/.VolumeIcon.icns"
+
+  # The contents still come from the folder, not from a mounted read-write image: macOS's fseventsd
+  # creates a hidden .fseventsd on a writable volume it sees activity on, and deleting it does not
+  # stick (the deletion is itself an event). What follows mounts the image only to flip one attribute
+  # and writes no files there, which is a much smaller exposure than laying out the whole payload —
+  # verified, the finished image contains .VolumeIcon.icns and nothing else hidden.
+  if SETFILE="$(xcrun --find SetFile 2>/dev/null)"; then
+    RW="build/$APP_NAME-rw.dmg"
+    rm -f "$RW"
+    hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDRW "$RW" >/dev/null
+    MOUNT="$(hdiutil attach "$RW" -nobrowse -mountrandom /tmp | grep -oE '/tmp/[A-Za-z0-9.]+$' | tail -1)"
+    if [[ -n "$MOUNT" ]]; then
+      "$SETFILE" -a C "$MOUNT"
+      hdiutil detach "$MOUNT" >/dev/null
+    fi
+    hdiutil convert "$RW" -format UDZO -o "$DMG" >/dev/null
+    rm -f "$RW"
+  else
+    # Cosmetic, so it must not cost the DMG. Falls back to the direct, never-mounted path.
+    echo "warning: SetFile not found — the DMG will use the generic volume icon." >&2
+    hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+  fi
   rm -rf "$STAGE"
   echo "Built $DMG"
 fi

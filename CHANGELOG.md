@@ -41,11 +41,13 @@ First release.
 - `./build.sh` produces a universal (arm64 + x86_64) ad-hoc signed bundle with no Xcode project and
   no third-party dependencies; `--dmg` packages an installer image.
 - **An app icon** — two gauge tracks with Anthropic-orange fills, echoing the dropdown's progress
-  bars. Headroom has no Dock tile and no window, so this is what Finder, the DMG, notification
-  banners, Login Items and the Keychain prompt show. Built from `assets/icon-1024.png` with `sips`
-  and `iconutil`, so the Command Line Tools remain enough to build; when Xcode is present,
-  `assets/Headroom.icon` is also compiled with `actool` so macOS 26 and later render the layered
-  icon. The `.icns` is identical either way.
+  bars. Headroom has no Dock tile and no window, so this is what Finder, notification banners, Login
+  Items and the Keychain prompt show. Built from `assets/icon-1024.png` with `sips` and `iconutil`,
+  so the Command Line Tools remain enough to build; when Xcode is present, `assets/Headroom.icon` is
+  also compiled with `actool` so macOS 26 and later render the layered icon, including the dark and
+  tinted appearances it derives. The `.icns` is identical either way.
+- The DMG carries a **volume icon**, so the window you drag from shows Headroom rather than a generic
+  white disk.
 
 - **The dropdown is a panel, not a greyed-out menu.** Each limit gets a small-caps heading with its
   reset time, the percentage alongside a countdown, and a slim progress bar in Anthropic orange.

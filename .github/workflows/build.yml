@@ -53,11 +53,14 @@ jobs:
           # a real icon family and not, say, a copied PNG.
           iconutil -c iconset "$RES/Headroom.icns" -o /tmp/icon-check.iconset
           test "$(ls /tmp/icon-check.iconset | wc -l | tr -d ' ')" -eq 10
-          # The trap this whole step exists for: an Icon Composer export is full-bleed, and downscaling
-          # it without insetting first yields art filling the tile edge to edge, which renders about a
-          # quarter larger than every other app in Finder — a regression that looks like a working
-          # icon in every check above. Measuring how much of the tile the artwork spans is what tells
-          # the two apart: Apple's grid is 824 of 1024, so ~80%, and the bug reads as 100%.
+          # The trap this whole step exists for: `assets/icon-1024.png` must be a render that already
+          # sits on Apple's grid (assets/render-icon.sh produces one, ~83% of the tile). Replacing it
+          # with a full-bleed Icon Composer export — the obvious thing to do, since that is what the
+          # app's File ▸ Export gives you — reads as 100% here and would ship an icon a quarter too
+          # large on macOS 13-15, which draw the .icns as authored. macOS 26 re-masks legacy .icns
+          # content into the system tile, so this regression is invisible on a current Mac: measured,
+          # inset and full-bleed bundles render to an identical 83.59% bbox there. This assertion is
+          # the only thing that catches it.
           #
           # In Swift because this needs a pixel, and sips cannot report one: `hasAlpha` only says the
           # channel exists, and there is no maxAlpha property. Swift is already a hard requirement of
@@ -97,8 +100,14 @@ jobs:
             test "$(plutil -extract CFBundleIconName raw "$PLIST")" = "Headroom"
             echo "OK — .icns and the layered Assets.car are both present."
           else
-            # Claiming a layered icon that isn't in the bundle is the failure this catches.
-            ! plutil -extract CFBundleIconName raw "$PLIST" >/dev/null 2>&1
+            # Claiming a layered icon that isn't in the bundle is the failure this catches. Written as
+            # an if/exit rather than `! plutil …`: bash exempts a command whose status is inverted with
+            # `!` from set -e, so the bare form is inert and this arm would pass on exactly the bundle
+            # it exists to reject.
+            if plutil -extract CFBundleIconName raw "$PLIST" >/dev/null 2>&1; then
+              echo "::error::CFBundleIconName is set but actool was unavailable, so no Assets.car was built."
+              exit 1
+            fi
             echo "OK — .icns present; actool unavailable, layered icon correctly skipped."
           fi
 
