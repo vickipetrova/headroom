@@ -116,11 +116,12 @@ final class MenuController: NSObject, NSMenuDelegate {
                 menu.addItem(countdownRow(for: window))
             }
             menu.addItem(.separator())
-            if let lastUpdated {
-                menu.addItem(row("Updated \(Fmt.clock(lastUpdated))"))
-            }
+            // The error line already carries the timestamp ("Showing data from 14:02"), so an
+            // Updated row alongside it would say the same thing twice.
             if let lastError {
                 menu.addItem(row(message(for: lastError)))
+            } else if let lastUpdated {
+                menu.addItem(row("Updated \(Fmt.clock(lastUpdated))"))
             }
         }
 
