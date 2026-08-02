@@ -85,6 +85,10 @@ Two things are easy to break and easy to check:
 One change per PR. If you're planning something large, open an issue first — I'd rather talk about
 the shape before you spend a weekend on it.
 
+`main` is protected: everything lands through a pull request, and CI has to be green before it can
+merge. That applies to me too, so if a change of mine looks like it took a detour through a branch,
+that's why.
+
 ## Commits
 
 [Conventional Commits](https://www.conventionalcommits.org/): `feat`, `fix`, `docs`, `chore`,

@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # GitHub Actions only. The app itself has no dependencies and never will — see hard rule 2 in
+  # CLAUDE.md — so `actions/checkout` in the two workflows is the entire third-party surface this
+  # repo has, and it is the one thing that goes stale without anyone noticing.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "chore"
+    labels:
+      - "dependencies"
