@@ -13,5 +13,6 @@ The app icon's sources live here too:
 `render-icon.sh` needs Xcode, which costs nothing extra: Icon Composer ships with Xcode, so anyone
 able to edit the document can already run it.
 
-See "The app icon" in `CLAUDE.md` for why the render comes from `actool` rather than Icon Composer's
-own export, and why `build.sh` must not inset the result a second time.
+See [`docs/ICON.md`](../docs/ICON.md) for why the render comes from `actool` rather than Icon
+Composer's own export, why `build.sh` must not inset the result a second time, and the measured traps
+in `sips`, `actool` and the DMG volume flag.
