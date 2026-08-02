@@ -56,6 +56,83 @@ for TRIPLE in arm64-apple-macosx x86_64-apple-macosx; do
 done
 lipo -create "${SLICES[@]}" -output "$BIN"
 
+# --- App icon ---------------------------------------------------------------------------------
+#
+# Headroom is LSUIElement, so it has no Dock tile and no window: the icon is seen in Finder, in the
+# DMG, on notification banners, in Login Items, and on the Keychain permission prompt. Those are the
+# whole surface area, which is why this is worth a build step rather than nothing.
+#
+# Two tiers, and the boundary between them is deliberately *additive*: the .icns is always the one
+# built here from the flattened export, byte for byte, whether or not Xcode is installed. Xcode only
+# ever adds the layered icon on top. A contributor with the Command Line Tools alone and CI therefore
+# ship the same icon, so "it looks different on my machine" cannot happen.
+ICON_PNG="assets/icon-1024.png"
+ICON_DOC="assets/Headroom.icon"
+ICONSET="build/$APP_NAME.iconset"
+# Empty on the CLT-only path. Interpolated into the plist below, so the layered icon is only claimed
+# when it is actually in the bundle — a CFBundleIconName pointing at an absent Assets.car makes
+# macOS fall back with a console complaint rather than silently.
+ICON_NAME_KEY=""
+
+# Tier 1: the classic .icns, from sips and iconutil, both of which are in /usr/bin.
+#
+# The inset is the part that is not obvious. `assets/icon-1024.png` is an Icon Composer export, and
+# those are full-bleed by design — measured, its squircle touches all four canvas edges (alpha 255 at
+# the top edge centre, 0 only in the corners) because on macOS 26 the system supplies the mask and the
+# shadow. Downscaling that straight into an iconset is the recipe everyone reaches for and it is
+# wrong: the art fills the whole tile, so the icon renders about a quarter larger than every other app
+# in Finder. Apple's grid puts the shape in 824 of 1024 with the rest as margin, which is also what
+# actool's own render of this artwork does. So scale to 824 and pad back out to 1024 first; sips pads
+# with transparency, verified, so no compositing tool is needed.
+#
+# Every size is then downscaled from that one inset master rather than inset individually, which is
+# what keeps the margin proportional at 16px as well as at 1024.
+echo "Rendering the app icon…"
+rm -rf "$ICONSET"
+mkdir -p "$ICONSET"
+sips -z 824 824 "$ICON_PNG" --out "build/icon-art.png" >/dev/null
+sips --padToHeightWidth 1024 1024 "build/icon-art.png" --out "build/icon-master.png" >/dev/null
+# Deliberately `set --` on an unquoted word: this file is bash, where that word-splits. It does not
+# split under zsh, so this loop silently produces one file named ".png" if you paste it into a shell.
+for SPEC in "16 icon_16x16" "32 icon_16x16@2x" "32 icon_32x32" "64 icon_32x32@2x" \
+            "128 icon_128x128" "256 icon_128x128@2x" "256 icon_256x256" "512 icon_256x256@2x" \
+            "512 icon_512x512" "1024 icon_512x512@2x"; do
+  set -- $SPEC
+  sips -z "$1" "$1" "build/icon-master.png" --out "$ICONSET/$2.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/$APP_NAME.icns"
+
+# Tier 2: the layered Icon Composer document, so macOS 26 and later can render it with the material
+# and specular treatment instead of a flat bitmap. actool lives inside Xcode.app, not the Command Line
+# Tools, so this is skipped silently when it is absent — the check is `xcrun --find`, which exits
+# non-zero under a CLT-only DEVELOPER_DIR.
+#
+# It compiles into a staging directory and only Assets.car is taken. actool also writes its own
+# Headroom.icns, and compiling straight into Contents/Resources would overwrite the complete one built
+# above with a four-size subset: --standalone-icon-behavior does not turn that output off, only
+# resizes it. Its render is arguably the nicer of the two — Apple's renderer, working from the layered
+# source, and it bakes in a drop shadow this one has no way to reproduce — but taking it would make
+# the bundle differ by build machine, which is the one thing this tier boundary exists to prevent.
+if ACTOOL="$(xcrun --find actool 2>/dev/null)"; then
+  ICON_STAGE="build/icon-actool"
+  rm -rf "$ICON_STAGE"
+  mkdir -p "$ICON_STAGE"
+  # Not fatal. A future actool that rejects this document must cost the layered icon, not the build.
+  if "$ACTOOL" "$ICON_DOC" \
+       --compile "$ICON_STAGE" \
+       --platform macosx \
+       --minimum-deployment-target "$MIN_MACOS" \
+       --app-icon "$APP_NAME" \
+       --output-partial-info-plist "$ICON_STAGE/partial.plist" \
+       --errors --warnings --notices >/dev/null 2>&1 && [[ -f "$ICON_STAGE/Assets.car" ]]; then
+    cp "$ICON_STAGE/Assets.car" "$APP/Contents/Resources/"
+    ICON_NAME_KEY="  <key>CFBundleIconName</key><string>$APP_NAME</string>"
+    echo "Compiled the layered icon for macOS 26+ (Assets.car)."
+  else
+    echo "warning: actool could not compile $ICON_DOC — shipping the .icns only." >&2
+  fi
+fi
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -68,6 +145,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>$APP_NAME</string>
+$ICON_NAME_KEY
   <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
   <key>LSUIElement</key><true/>
   <key>NSAppTransportSecurity</key>
