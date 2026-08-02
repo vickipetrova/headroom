@@ -27,9 +27,13 @@ jobs:
       - name: Check nothing logs the token
         run: |
           set -euo pipefail
-          # Cheap guard against the one mistake that actually matters here. Flags any print/NSLog
-          # whose argument mentions a token or credential.
-          if grep -rnE '(print|NSLog|debugPrint|FileHandle\.standardError)[^\n]*[Tt]oken' Sources/; then
+          # Cheap guard against the one mistake that actually matters here: flag any print/NSLog
+          # whose argument mentions a token. Comment lines are excluded — the files that handle the
+          # token describe in prose that they never log it, and that prose is not a violation.
+          hits="$(grep -rnE '(print|NSLog|debugPrint|os_log|FileHandle\.standardError)[^\n]*[Tt]oken' Sources/ \
+                  | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*)' || true)"
+          if [ -n "$hits" ]; then
+            echo "$hits"
             echo "::error::Source appears to log a token. See the guardrails in CLAUDE.md."
             exit 1
           fi
