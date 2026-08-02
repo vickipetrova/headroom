@@ -97,7 +97,8 @@ that's why.
 ## Conduct
 
 Be decent. Critique code, not people; assume the other person is trying to help. That's the whole
-policy.
+policy, and [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) is the long form of it, including how to
+report a problem privately.
 
 ## License
 
