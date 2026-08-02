@@ -28,9 +28,10 @@ There is no Xcode project. SwiftPM compiles the sources and `build.sh` wraps the
 | `Sources/Headroom/main.swift` | Six lines of top-level code. Top-level code can't live in a library target, so this is all the executable target holds |
 | `Sources/HeadroomCore/AppDelegate.swift` | Wires provider → menu, owns the poll timer and the 60s countdown tick, refreshes on wake. The **only** public symbol in the module |
 | `Sources/HeadroomCore/MenuController.swift` | The status item: menu bar title, dropdown, Settings submenu. Knows nothing about where usage comes from |
+| `Sources/HeadroomCore/UsagePanel.swift` | The dropdown's SwiftUI rows, and the pure `UsageRow` view model behind them. Which limits reach the *menu bar title* is `TitleSelection`, in MenuController.swift |
 | `Sources/HeadroomCore/UsageAPI.swift` | `LimitWindow` model, `UsageProvider` protocol, `ClaudeProvider` (endpoint client + all response parsing) |
 | `Sources/HeadroomCore/Credentials.swift` | Token discovery across the login Keychain and the credentials file, ranked rather than first-wins |
-| `Sources/HeadroomCore/Format.swift` | Percentages, countdowns, locale-aware clock times, the colour ramp |
+| `Sources/HeadroomCore/Format.swift` | Percentages, countdowns, locale-aware clock times, the colour modes, the menu bar spark image |
 | `Sources/HeadroomCore/Settings.swift` | UserDefaults-backed preferences; launch-at-login proxies `SMAppService` |
 | `Sources/HeadroomCore/Notifier.swift` | Threshold alerts, deduplicated per window per reset period |
 
@@ -46,15 +47,18 @@ what makes adding a second provider one new file, so don't put Claude-specific s
 
 1. **Never print, log, or commit the OAuth token**, or the contents of the credentials file. Not in
    debug output, not in error messages, not in CI. `.github/workflows/build.yml` greps for this.
-2. **Zero third-party dependencies.** AppKit, Foundation, Security, UserNotifications,
+2. **Zero third-party dependencies.** AppKit, SwiftUI, Foundation, Security, UserNotifications,
    ServiceManagement. `Package.swift` has no `dependencies:` array and never should. Tests use
    swift-testing, which ships with the toolchain — **not XCTest**, which is absent from the Command
    Line Tools and would break the CLT-only build contract.
 3. **All parsing of the usage endpoint must be defensive.** It is undocumented and it drifts.
    Missing, null, or wrong-typed fields drop that *one* row and render `–`. Never force-unwrap a
    field from the response; never throw on a shape you didn't expect.
-4. **`build.sh` signs ad-hoc only.** It must never handle a Developer ID, an app-specific password,
-   or notarization credentials. Releasing is a manual maintainer step — see `docs/RELEASING.md`.
+4. **No secrets in the repo, and no notarization machinery in `build.sh`.** It signs ad-hoc by
+   default and may use `$HEADROOM_SIGN_ID` — an identity name, resolved from the developer's own
+   Keychain — but it must never contain or handle a certificate, an app-specific password, or
+   anything notarization needs. Releasing stays a manual maintainer step (`docs/RELEASING.md`), and
+   CI signs ad-hoc and drafts the release for a signed build to replace.
 5. **One network destination:** `api.anthropic.com`. No analytics, no update checks.
 
 ## The response shape
@@ -63,7 +67,7 @@ The endpoint returns two overlapping shapes, and `ClaudeProvider.windows(in:)` r
 
 - **Preferred:** a `limits` array of `{kind, percent, resets_at, scope}` where `kind` is `session`,
   `weekly_all`, or `weekly_scoped`. Scoped entries name their own model in
-  `scope.model.display_name`, which is why the third row says "THIS WEEK (Fable)" rather than
+  `scope.model.display_name`, which is why the third row says "WEEKLY · FABLE" rather than
   hardcoding Opus.
 - **Legacy:** top-level `five_hour`, `seven_day`, `seven_day_opus` with `utilization` / `resets_at`.
   Used to fill in anything the array didn't provide, **per field**.
@@ -92,6 +96,43 @@ that traps on infinity or anything past `Int`'s range. `scope.model.display_name
 and lands in a menu label, a notification title *and* a `UserDefaults` key, so it is trimmed,
 flattened, length-capped, and rejected when empty.
 
+## Why the dropdown's rows are custom views
+
+A menu item that isn't a command has to be disabled, and macOS draws disabled items dimmed — which is
+why the panel used to look washed out. The informational rows are therefore SwiftUI views in
+`NSMenuItem.view`, which AppKit does *not* dim, while `NSMenu` still supplies the material, the
+dismissal behaviour and key equivalents for the real commands.
+
+Four things were measured before committing to this, and each would have sunk it:
+
+- **SwiftUI does repaint while a menu is tracking.** Reassigning `NSHostingView.rootView` updates the
+  row on screen mid-tracking, which is what lets `refreshLiveRows` keep working. If it had deferred
+  until tracking ended, held-open menus would have silently frozen again.
+- **`isEnabled = false` does not dim a custom view** — only the item's own drawing. So these rows can
+  be inert without going grey.
+- **`title` still reaches AppleScript and VoiceOver on a view-backed item**, so `NSMenuItem.hosting`
+  sets it and the `osascript` recipe below still works. Set it on every view-backed row.
+- **Sizing** needs `hostingView.frame.size = hostingView.fittingSize`, or the item lays out at zero
+  height on first display. The SwiftUI frame is `minWidth`/`maxWidth: .infinity`, not a fixed width,
+  and the hosting view carries `autoresizingMask = [.width]`: AppKit sizes the menu from the widest
+  item and adds ~65pt of its own chrome, but lays the view out at x=0 without stretching it, so a
+  fixed-width row leaves that chrome as dead space and the separators visibly overrun the text.
+
+`NSApp.appearance` does **not** drive menu rendering, so dark mode can only be checked by switching
+the system appearance — a forced-appearance probe will render light regardless and mislead you.
+
+Section headings inside the *Settings submenu* are deliberately still plain dimmed items: a greyed
+heading is the conventional look inside a menu, and the rows it labels are commands, not data.
+
+**Commands stay plain `NSMenuItem`s**, and this is not a style preference — two things were measured
+on a view-backed version of Refresh Now. A hosting view swallows the mouse event, so
+`NSMenuItem.action` never fires and the row has to reimplement its own selection and dismissal. And
+`keyEquivalent` stops working outright: ⌘Q on a plain item kept working while ⌘R on the view-backed
+row did nothing, and `NSMenuDelegate.menuHasKeyEquivalent` — the documented hook for reclaiming it —
+is not consulted for status-item menus. A custom command row costs the shortcut, the native
+highlight, and AppKit's click routing; that is why Refresh Now shows its age as plain text rather
+than as a badge.
+
 ## The open dropdown
 
 `rebuild()` refuses to run while the menu is open, and rows are updated in place instead through
@@ -100,7 +141,7 @@ Settings submenu, it re-targets a click already in flight (aim at "Refresh Now",
 Headroom"), and it destroys highlight and keyboard state. `menuNeedsUpdate` also fires during ⌘R/⌘Q
 key-equivalent matching, so this is reachable without the menu ever being clicked.
 
-Live rows close over the window's **label** and look it up in current state, never over a
+Live rows close over the window's **`id`** and look it up in current state, never over a
 `LimitWindow` value. Capturing the value made a held-open menu keep counting down to a reset the poll
 had already replaced, reach "now", and stay pinned there until the menu was reopened.
 

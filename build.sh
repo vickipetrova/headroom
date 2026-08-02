@@ -76,8 +76,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signing only — this repo never handles a Developer ID or notarization credentials.
-# Signing and notarizing a release is a manual maintainer step: see docs/RELEASING.md.
+# Ad-hoc by default. Set HEADROOM_SIGN_ID to a signing identity in your Keychain to use that
+# instead — no secret ever lives in this repo, and this script still knows nothing about
+# notarization, which stays a manual maintainer step (docs/RELEASING.md).
+#
+# Worth doing while developing: an ad-hoc signature's designated requirement is the binary's own
+# hash, so every code change makes Headroom a different app to macOS and the Keychain re-asks for
+# permission to read your Claude Code login. A real identity gives a stable, identity-based
+# requirement, so "Always Allow" sticks across rebuilds:
+#
+#   HEADROOM_SIGN_ID="Apple Development: Your Name (TEAMID)" ./build.sh
+#
 # xattr first: extended attributes (quarantine, Finder info) make codesign refuse the bundle, and
 # that is the one benign failure this step used to swallow.
 #
@@ -85,7 +94,12 @@ PLIST
 # all, so hiding a codesign failure here does not produce an unsigned-but-working app — it produces
 # a build that dies at launch as "Headroom is damaged", with the actual error discarded.
 xattr -cr "$APP"
-codesign --force --sign - "$APP"
+if [[ -n "${HEADROOM_SIGN_ID:-}" ]]; then
+  echo "Signing with: $HEADROOM_SIGN_ID"
+  codesign --force --options runtime --timestamp --sign "$HEADROOM_SIGN_ID" "$APP"
+else
+  codesign --force --sign - "$APP"
+fi
 
 echo "Built $APP"
 

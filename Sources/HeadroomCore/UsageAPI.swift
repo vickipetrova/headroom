@@ -16,11 +16,33 @@ struct LimitWindow: Equatable {
         case weeklyScoped
     }
 
+    static let sessionID = "session"
+    static let weeklyID = "weekly"
+    static func scopedID(model: String) -> String { "scoped:\(model)" }
+
     let kind: Kind
-    /// Heading for this window in the dropdown, e.g. "THIS WEEK (all models)".
+
+    /// Stable identity — `"session"`, `"weekly"`, `"scoped:Opus"` — and the only thing that should
+    /// ever be used to recognise "the same window" across polls.
+    ///
+    /// Separate from `label` on purpose. Identity used to *be* the display string, which meant
+    /// restyling a heading silently changed which alerts counted as already-sent, and a model
+    /// renamed by the vendor mid-period produced a duplicate alert. (The obvious fix,
+    /// `scope.model.id`, isn't available: that field is null in the real response.)
+    let id: String
+
+    /// Display heading for the dropdown. Free to restyle — nothing keys off it.
     let label: String
     /// Sentence-case form for notifications, e.g. "This week".
     let shortLabel: String
+
+    /// How this window is offered in the Show in Menu Bar list, e.g. "Session (5h)" or "Fable".
+    ///
+    /// Supplied by the provider like every other piece of display copy. "5h" is Claude's session
+    /// length, not the app's — a provider whose short window is an hour would otherwise get a
+    /// settings row that lies, and `MenuController` would be holding a vendor's fact, which is
+    /// exactly what it is not allowed to do.
+    let optionLabel: String
     /// Percent of the window consumed, 0–100.
     let utilization: Double
     let resetsAt: Date?
@@ -204,29 +226,55 @@ struct ClaudeProvider: UsageProvider {
                                        utilization: legacy.utilization, resetsAt: legacy.resetsAt))
         }
 
-        return [session, weekly].compactMap { $0 } + scoped
+        // `id` is what the menu matches rows on and what alert markers are keyed on, so it has to be
+        // unique — and it is derived from a server-controlled model name. Two scoped entries sharing
+        // a display name would otherwise collapse: both rows would render the first one's numbers,
+        // and their alerts would share a marker.
+        return [session, weekly].compactMap { $0 } + uniquelyIdentified(scoped)
+    }
+
+    private static func uniquelyIdentified(_ windows: [LimitWindow]) -> [LimitWindow] {
+        var taken: Set<String> = []
+        return windows.map { window in
+            // Loops rather than counting occurrences: a suffix can itself collide, because a model
+            // could genuinely be named "Opus#2" and the generated id for a second "Opus" is exactly
+            // that. Counting alone would emit the duplicate this pass exists to prevent.
+            var id = window.id
+            var suffix = 1
+            while !taken.insert(id).inserted {
+                suffix += 1
+                id = "\(window.id)#\(suffix)"
+            }
+            guard id != window.id else { return window }
+            return LimitWindow(kind: window.kind, id: id,
+                               label: window.label, shortLabel: window.shortLabel,
+                               optionLabel: window.optionLabel,
+                               utilization: window.utilization, resetsAt: window.resetsAt)
+        }
     }
 
     // One builder per window kind, so the array branch and the legacy branch can't drift apart in
     // how they label the same window.
 
     private static func sessionWindow(utilization: Double, resetsAt: Date?) -> LimitWindow {
-        LimitWindow(kind: .session,
-                    label: "SESSION (5-hour window)", shortLabel: "Session",
+        LimitWindow(kind: .session, id: LimitWindow.sessionID,
+                    label: "SESSION · 5-HOUR", shortLabel: "Session", optionLabel: "Session (5h)",
                     utilization: utilization, resetsAt: resetsAt)
     }
 
     private static func weeklyWindow(utilization: Double, resetsAt: Date?) -> LimitWindow {
-        LimitWindow(kind: .weekly,
-                    label: "THIS WEEK (all models)", shortLabel: "This week",
+        LimitWindow(kind: .weekly, id: LimitWindow.weeklyID,
+                    label: "WEEKLY · ALL MODELS", shortLabel: "Weekly",
+                    optionLabel: "Weekly (all models)",
                     utilization: utilization, resetsAt: resetsAt)
     }
 
     private static func scopedWindow(model: String, utilization: Double,
                                      resetsAt: Date?) -> LimitWindow {
-        LimitWindow(kind: .weeklyScoped,
-                    label: "THIS WEEK (\(model))",
-                    shortLabel: "This week (\(model))",
+        LimitWindow(kind: .weeklyScoped, id: LimitWindow.scopedID(model: model),
+                    label: "WEEKLY · \(model.uppercased())",
+                    shortLabel: "Weekly (\(model))",
+                    optionLabel: model,
                     utilization: utilization, resetsAt: resetsAt)
     }
 
@@ -237,7 +285,11 @@ struct ClaudeProvider: UsageProvider {
 
     private static func modelName(_ any: Any?) -> String {
         guard let raw = any as? String else { return "scoped" }
+        // Strips control characters, not just newlines: this string reaches a menu label, a
+        // notification title and a UserDefaults key, and bidi overrides like U+202E can reorder the
+        // text around it.
         let cleaned = raw
+            .components(separatedBy: .controlCharacters).joined(separator: " ")
             .components(separatedBy: .newlines).joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return "scoped" }
