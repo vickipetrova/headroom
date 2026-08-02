@@ -42,8 +42,8 @@ First release.
   Previously every informational row was a *disabled* menu item, which macOS draws dimmed — so the
   whole panel read as unavailable. Those rows are now custom views, which macOS renders at full
   strength, while the menu itself still supplies the native material, dismissal and ⌘R/⌘Q.
-  **Refresh Now** says how old the numbers are — "updated just now", "updated 5m ago" — instead of
-  a separate Updated line, so freshness sits next to the thing that acts on it.
+  **Refresh Now** says how old the numbers are — "Refresh Now (just now)", "Refresh Now (5m ago)" —
+  instead of a separate Updated line, so freshness sits next to the thing that acts on it.
 - **Tests.** `swift test --disable-xctest` covers endpoint parsing, formatting, alert de-duplication, preference
   validation, credential parsing, and the dropdown's view model. The project builds through SwiftPM (`Package.swift`, no
   third-party dependencies); `build.sh` still produces the universal, ad-hoc-signed `.app`.
