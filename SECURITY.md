@@ -1,14 +1,54 @@
 # Security
 
-> Scaffold — written for real in the docs pass (Phase 5).
+Headroom handles one sensitive thing: your Claude Code OAuth token. Here is exactly what happens
+to it.
 
-**What Headroom reads.** Your Claude Code OAuth token, from `~/.claude/.credentials.json` or the
-macOS login Keychain item `Claude Code-credentials`. It is held in memory for the duration of a
-request and never written anywhere.
+## What it reads
 
-**Where it goes.** `https://api.anthropic.com/api/oauth/usage`, and nowhere else. That is the app's
-only network destination. No telemetry, no analytics, no update checks.
+The access token Claude Code already stores, from the first of these that exists:
 
-**Reporting.** Open a GitHub issue for anything non-sensitive. For something you'd rather not post
-publicly, use GitHub's private vulnerability reporting on this repo. Never include your token or
-credentials file in a report.
+1. `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`
+2. The macOS login Keychain, generic password, service `Claude Code-credentials`
+
+The Keychain read goes through `Security.framework` in-process (`SecItemCopyMatching`), not by
+shelling out to `/usr/bin/security` — so the token never crosses a pipe or appears in any
+subprocess's output.
+
+Headroom reads the token fresh for each request and drops it. It never caches it, writes it to
+disk, or copies it anywhere. Nothing in the source prints or logs it, and CI fails the build if a
+`print`/`NSLog` mentioning a token appears in `Sources/`.
+
+## Where it goes
+
+One destination, one request:
+
+```
+GET https://api.anthropic.com/api/oauth/usage
+```
+
+That's the entire network surface. No telemetry, no analytics, no crash reporting, no update
+checks, no third-party services. The URLSession is ephemeral, so no response is cached to disk.
+
+## What it stores
+
+In `UserDefaults` (`com.vickipetrova.headroom`) only:
+
+- your refresh interval and alert threshold
+- one marker per limit window recording the reset timestamp already alerted on, so you don't get
+  the same alert twice
+
+Launch at Login is stored by macOS, not by Headroom. No credentials, no usage history, no logs.
+
+## Reporting a problem
+
+For anything non-sensitive, [open an issue](../../issues). For a vulnerability, use GitHub's
+private vulnerability reporting on this repository (Security › Report a vulnerability).
+
+**Never include your token, your credentials file, or a screenshot showing them in a report.** If
+you think your token has been exposed, sign out of Claude Code and sign back in — that rotates it.
+
+## Scope note
+
+Headroom is unofficial and reads an undocumented endpoint. It cannot change your plan, spend money,
+or modify anything in your Claude Code setup; it only reads. But it is a side project maintained by
+one person and audited by whoever reads the source — which is the point of keeping it this small.
