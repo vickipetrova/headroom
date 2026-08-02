@@ -124,6 +124,13 @@ final class MenuController: NSObject, NSMenuDelegate {
             }
         }
 
+        if Settings.notifyThreshold > 0, Notifier.alertsBlocked {
+            menu.addItem(.separator())
+            let item = action("Alerts blocked — open Notification settings",
+                              key: "", selector: #selector(openNotificationSettings))
+            menu.addItem(item)
+        }
+
         menu.addItem(.separator())
         menu.addItem(action("Refresh Now", key: "r", selector: #selector(refreshClicked)))
         menu.addItem(settingsItem())
@@ -225,6 +232,12 @@ final class MenuController: NSObject, NSMenuDelegate {
         item.target = self
         item.isEnabled = true
         return item
+    }
+
+    @objc private func openNotificationSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+        else { return }
+        NSWorkspace.shared.open(url)
     }
 
     @objc private func refreshClicked() { onRefresh?() }

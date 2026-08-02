@@ -9,10 +9,23 @@ import UserNotifications
 enum Notifier {
     private static let defaults = UserDefaults.standard
 
-    /// Asked once, at launch. macOS remembers the answer; calling again is a no-op.
+    /// True when alerts are switched on but macOS won't deliver them — the user denied the
+    /// prompt, or the build isn't eligible to register for notifications at all (an ad-hoc
+    /// signed build from source is refused outright on recent macOS).
+    ///
+    /// Worth surfacing: without it the app looks like it's watching your usage and simply never
+    /// says anything. Read and written on the main thread only.
+    private(set) static var alertsBlocked = false
+
+    /// Asked once, at launch. macOS remembers the answer, so calling again just returns it.
     static func requestAuthorizationIfNeeded() {
-        guard Settings.notifyThreshold > 0 else { return }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        guard Settings.notifyThreshold > 0 else {
+            alertsBlocked = false
+            return
+        }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            DispatchQueue.main.async { alertsBlocked = !granted }
+        }
     }
 
     static func evaluate(_ windows: [LimitWindow]) {
