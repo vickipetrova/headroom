@@ -5,10 +5,13 @@ to it.
 
 ## What it reads
 
-The access token Claude Code already stores, from the first of these that exists:
+The access token Claude Code already stores, from either of:
 
-1. `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`
-2. The macOS login Keychain, generic password, service `Claude Code-credentials`
+- The macOS login Keychain, generic password, service `Claude Code-credentials`
+- `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`
+
+When both exist Headroom compares their expiry timestamps and uses whichever lives longest, so a
+stale leftover file can't shadow the login Claude Code is actively refreshing.
 
 The Keychain read goes through `Security.framework` in-process (`SecItemCopyMatching`), not by
 shelling out to `/usr/bin/security` — so the token never crosses a pipe or appears in any
@@ -27,7 +30,9 @@ GET https://api.anthropic.com/api/oauth/usage
 ```
 
 That's the entire network surface. No telemetry, no analytics, no crash reporting, no update
-checks, no third-party services. The URLSession is ephemeral, so no response is cached to disk.
+checks, no third-party services. The URLSession is ephemeral, so no response is cached to disk, and
+it refuses every redirect — the token cannot be forwarded to another host even if the endpoint
+starts returning one.
 
 ## What it stores
 

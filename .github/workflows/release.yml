@@ -13,6 +13,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # `VERSION` in build.sh is what lands in CFBundleVersion / CFBundleShortVersionString, and
+      # nothing ties it to the tag. Tagging v0.2.0 on a commit where build.sh still says 0.1.0
+      # would otherwise draft a perfectly healthy release of an app that reports the old version —
+      # a mismatch nobody sees until a user reads About. First step, so it fails in seconds.
+      - name: Check the tag matches VERSION in build.sh
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^VERSION="\(.*\)"/\1/p' build.sh)"
+          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag is $GITHUB_REF_NAME but build.sh has VERSION=\"$VERSION\" (expected tag v$VERSION). Bump VERSION, or delete and re-cut the tag — see docs/RELEASING.md."
+            exit 1
+          fi
+          echo "OK — tag $GITHUB_REF_NAME matches VERSION $VERSION."
+
+      # build.yml never runs on tags, so nothing else stands between a broken commit and a drafted
+      # release — the tag is often the first time that commit is built at all. Same --disable-xctest
+      # as build.yml: the runner has full Xcode, so without it an `import XCTest` sails through here
+      # while being unbuildable for the Command Line Tools contributors this project targets.
+      - name: Test
+        run: swift test --disable-xctest
+
       - name: Build app + DMG
         run: ./build.sh --dmg
 

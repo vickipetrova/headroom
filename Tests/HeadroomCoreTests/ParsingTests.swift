@@ -267,15 +267,38 @@ import Testing
         #expect(result[0].resetsAt == nil)
     }
 
-    /// Every link of the `scope.model.display_name` chain can be missing independently.
+    /// Every link of the `scope.model.display_name` chain can be missing independently — and an
+    /// empty or blank name is as unusable as a missing one. It used to render "THIS WEEK ()".
     @Test(arguments: ["", #", "scope": null"#, #", "scope": {}"#,
                       #", "scope": {"model": null}"#, #", "scope": {"model": {}}"#,
-                      #", "scope": {"model": {"display_name": null}}"#])
-    func shallowScopeFallsBackToAGenericLabel(_ scope: String) throws {
+                      #", "scope": {"model": {"display_name": null}}"#,
+                      #", "scope": {"model": {"display_name": ""}}"#,
+                      #", "scope": {"model": {"display_name": "   "}}"#,
+                      #", "scope": {"model": {"display_name": 42}}"#])
+    func unusableScopeFallsBackToAGenericLabel(_ scope: String) throws {
         let result = try windows(#"""
         {"limits": [{"kind": "weekly_scoped", "percent": 30\#(scope)}]}
         """#)
         #expect(result.map(\.label) == ["THIS WEEK (scoped)"])
+    }
+
+    /// The model name is server-controlled and ends up in a menu label, a notification title, and a
+    /// `UserDefaults` key, so it is bounded rather than trusted.
+    @Test func aRidiculousModelNameIsBounded() throws {
+        let huge = String(repeating: "A", count: 5_000)
+        let result = try windows(#"""
+        {"limits": [{"kind": "weekly_scoped", "percent": 30,
+                     "scope": {"model": {"display_name": "\#(huge)"}}}]}
+        """#)
+        #expect(try #require(result.first).label.count < 100)
+    }
+
+    @Test func aModelNameWithNewlinesIsFlattened() throws {
+        let result = try windows(#"""
+        {"limits": [{"kind": "weekly_scoped", "percent": 30,
+                     "scope": {"model": {"display_name": "Opus\n4.5"}}}]}
+        """#)
+        #expect(result.map(\.label) == ["THIS WEEK (Opus 4.5)"])
     }
 
     /// Regression: `Fmt.pct` converts to Int, and converting a Double to Int traps on a value past

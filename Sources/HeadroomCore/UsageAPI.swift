@@ -29,12 +29,20 @@ struct LimitWindow: Equatable {
 /// A source of usage windows. `ClaudeProvider` is the only implementation in v0.1; the protocol
 /// exists so Cursor/Codex/Copilot providers can be added without MenuController changing.
 protocol UsageProvider {
-    var name: String { get }
     func fetch(completion: @escaping (Result<[LimitWindow], Error>) -> Void)
+}
+
+/// `JSONSerialization` turns `true`/`false` into `NSNumber`s, and `NSNumber as? Double` happily
+/// yields 1.0 and 0.0 — so a boolean sails through any numeric parse unless it is rejected first.
+/// Comparing the CoreFoundation type id is the only reliable discriminator: `as? Bool` is no good,
+/// because `NSNumber(42) as? Bool` also succeeds. Shared by the usage parser and `Credentials`.
+func isJSONBoolean(_ any: Any) -> Bool {
+    CFGetTypeID(any as CFTypeRef) == CFBooleanGetTypeID()
 }
 
 enum UsageError: LocalizedError {
     case noCredentials
+    case credentialsAccessDenied
     case unauthorized
     case http(Int)
     case network(Error)
@@ -44,6 +52,8 @@ enum UsageError: LocalizedError {
         switch self {
         case .noCredentials:
             return "No Claude Code login found. Open Claude Code once to sign in."
+        case .credentialsAccessDenied:
+            return "Can't read your Claude Code login — allow Headroom access when macOS asks."
         case .unauthorized:
             return "Token expired — open a Claude Code session to refresh it."
         case .http(let code):
@@ -59,9 +69,22 @@ enum UsageError: LocalizedError {
 // MARK: - Claude
 
 struct ClaudeProvider: UsageProvider {
-    let name = "Claude"
-
     private static let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+
+    /// Refuses every redirect, so the bearer token can only ever be sent to the one host in
+    /// `endpoint`. SECURITY.md promises exactly one network destination; without this that promise
+    /// rests on CFNetwork's uncontracted behaviour for `Authorization` across a cross-host hop, for
+    /// an endpoint we already expect to drift. A 3xx now surfaces as an ordinary `UsageError.http`.
+    private final class RefuseRedirects: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask,
+                        willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest,
+                        completionHandler: @escaping (URLRequest?) -> Void) {
+            completionHandler(nil)
+        }
+    }
+
+    private static let redirectPolicy = RefuseRedirects()
 
     /// Ephemeral: no on-disk cache of usage responses, and no chance of serving a stale one.
     private static let session: URLSession = {
@@ -69,42 +92,61 @@ struct ClaudeProvider: UsageProvider {
         config.timeoutIntervalForRequest = 15
         config.urlCache = nil
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        return URLSession(configuration: config)
+        return URLSession(configuration: config, delegate: redirectPolicy, delegateQueue: nil)
     }()
 
-    func fetch(completion: @escaping (Result<[LimitWindow], Error>) -> Void) {
-        guard let token = Credentials.accessToken() else {
-            completion(.failure(UsageError.noCredentials))
-            return
-        }
+    /// Serialized and off the caller's thread on purpose. Reading the Keychain can put a modal
+    /// permission dialog on screen, and every caller of `refresh()` is the main thread — so doing it
+    /// inline would freeze the menu bar until the user answered. Serial also stops the poll timer and
+    /// the wake notification from stacking two dialogs on top of each other.
+    private static let credentialQueue = DispatchQueue(label: "com.vickipetrova.headroom.credentials")
 
-        var request = URLRequest(url: Self.endpoint)
+    func fetch(completion: @escaping (Result<[LimitWindow], Error>) -> Void) {
+        Self.credentialQueue.async {
+            switch Credentials.accessToken() {
+            case .failure(let failure):
+                completion(.failure(failure == .accessDenied
+                    ? UsageError.credentialsAccessDenied
+                    : UsageError.noCredentials))
+            case .success(let token):
+                Self.send(token: token, completion: completion)
+            }
+        }
+    }
+
+    private static func send(token: String,
+                             completion: @escaping (Result<[LimitWindow], Error>) -> Void) {
+        var request = URLRequest(url: endpoint)
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        Self.session.dataTask(with: request) { data, response, error in
-            if let error {
-                completion(.failure(UsageError.network(error)))
-                return
-            }
-            guard let http = response as? HTTPURLResponse, let data else {
-                completion(.failure(UsageError.badResponse))
-                return
-            }
-            guard http.statusCode == 200 else {
-                completion(.failure(http.statusCode == 401
-                    ? UsageError.unauthorized
-                    : UsageError.http(http.statusCode)))
-                return
-            }
-            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                completion(.failure(UsageError.badResponse))
-                return
-            }
-            completion(.success(Self.windows(in: object)))
+        session.dataTask(with: request) { data, response, error in
+            completion(result(data: data, response: response, error: error))
         }.resume()
+    }
+
+    /// Everything between the socket and the parser, as a pure function so it can be tested without
+    /// a network — the same reason `windows(in:)` is separate. This is the second-likeliest place for
+    /// the endpoint to drift (a new status code, an `{"error": …}` envelope), and it used to be
+    /// unreachable by any test because it lived inside the `dataTask` closure.
+    static func result(data: Data?, response: URLResponse?, error: Error?)
+        -> Result<[LimitWindow], Error> {
+        if let error { return .failure(UsageError.network(error)) }
+        guard let http = response as? HTTPURLResponse, let data else {
+            return .failure(UsageError.badResponse)
+        }
+        guard http.statusCode == 200 else {
+            return .failure(http.statusCode == 401
+                ? UsageError.unauthorized
+                : UsageError.http(http.statusCode))
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            // Covers a JSON array root and anything that isn't JSON at all.
+            return .failure(UsageError.badResponse)
+        }
+        return .success(windows(in: object))
     }
 
     // MARK: - Parsing
@@ -136,14 +178,12 @@ struct ClaudeProvider: UsageProvider {
 
             switch kind {
             case "session":
-                session = LimitWindow(kind: .session, label: sessionLabel, shortLabel: sessionShort,
-                                      utilization: utilization, resetsAt: resetsAt)
+                session = sessionWindow(utilization: utilization, resetsAt: resetsAt)
             case "weekly_all":
-                weekly = LimitWindow(kind: .weekly, label: weeklyLabel, shortLabel: weeklyShort,
-                                     utilization: utilization, resetsAt: resetsAt)
+                weekly = weeklyWindow(utilization: utilization, resetsAt: resetsAt)
             case "weekly_scoped":
-                let model = ((entry["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
-                scoped.append(scopedWindow(model: model ?? "scoped",
+                let scope = (entry["scope"] as? [String: Any])?["model"] as? [String: Any]
+                scoped.append(scopedWindow(model: modelName(scope?["display_name"]),
                                            utilization: utilization, resetsAt: resetsAt))
             default:
                 continue  // A kind we don't know yet. Ignoring it beats guessing at a label.
@@ -154,12 +194,10 @@ struct ClaudeProvider: UsageProvider {
         // didn't provide, so a rename on either side degrades to a missing row rather than a
         // blank app.
         if session == nil, let legacy = legacyWindow(object["five_hour"]) {
-            session = LimitWindow(kind: .session, label: sessionLabel, shortLabel: sessionShort,
-                                  utilization: legacy.utilization, resetsAt: legacy.resetsAt)
+            session = sessionWindow(utilization: legacy.utilization, resetsAt: legacy.resetsAt)
         }
         if weekly == nil, let legacy = legacyWindow(object["seven_day"]) {
-            weekly = LimitWindow(kind: .weekly, label: weeklyLabel, shortLabel: weeklyShort,
-                                 utilization: legacy.utilization, resetsAt: legacy.resetsAt)
+            weekly = weeklyWindow(utilization: legacy.utilization, resetsAt: legacy.resetsAt)
         }
         if scoped.isEmpty, let legacy = legacyWindow(object["seven_day_opus"]) {
             scoped.append(scopedWindow(model: "Opus",
@@ -169,10 +207,20 @@ struct ClaudeProvider: UsageProvider {
         return [session, weekly].compactMap { $0 } + scoped
     }
 
-    private static let sessionLabel = "SESSION (5-hour window)"
-    private static let sessionShort = "Session"
-    private static let weeklyLabel = "THIS WEEK (all models)"
-    private static let weeklyShort = "This week"
+    // One builder per window kind, so the array branch and the legacy branch can't drift apart in
+    // how they label the same window.
+
+    private static func sessionWindow(utilization: Double, resetsAt: Date?) -> LimitWindow {
+        LimitWindow(kind: .session,
+                    label: "SESSION (5-hour window)", shortLabel: "Session",
+                    utilization: utilization, resetsAt: resetsAt)
+    }
+
+    private static func weeklyWindow(utilization: Double, resetsAt: Date?) -> LimitWindow {
+        LimitWindow(kind: .weekly,
+                    label: "THIS WEEK (all models)", shortLabel: "This week",
+                    utilization: utilization, resetsAt: resetsAt)
+    }
 
     private static func scopedWindow(model: String, utilization: Double,
                                      resetsAt: Date?) -> LimitWindow {
@@ -180,6 +228,20 @@ struct ClaudeProvider: UsageProvider {
                     label: "THIS WEEK (\(model))",
                     shortLabel: "This week (\(model))",
                     utilization: utilization, resetsAt: resetsAt)
+    }
+
+    /// The model name is server-controlled and ends up in a menu label, a notification title, and a
+    /// `UserDefaults` key, so it is bounded here rather than trusted. An empty name used to render
+    /// "THIS WEEK ()".
+    private static let modelNameLimit = 64
+
+    private static func modelName(_ any: Any?) -> String {
+        guard let raw = any as? String else { return "scoped" }
+        let cleaned = raw
+            .components(separatedBy: .newlines).joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return "scoped" }
+        return String(cleaned.prefix(modelNameLimit))
     }
 
     private static func legacyWindow(_ any: Any?) -> (utilization: Double, resetsAt: Date?)? {
@@ -196,7 +258,8 @@ struct ClaudeProvider: UsageProvider {
     /// `{"percent": 1e30}` — or `1e999`, which JSON parses to +infinity — would crash the menu bar
     /// rather than dropping a row.
     private static func number(_ any: Any?) -> Double? {
-        guard let any, !isBoolean(any) else { return nil }
+        // See `isJSONBoolean`: without this, `{"percent": true}` reads as 1%.
+        guard let any, !isJSONBoolean(any) else { return nil }
         let value: Double
         if let double = any as? Double { value = double }
         else if let int = any as? Int { value = Double(int) }
@@ -211,16 +274,9 @@ struct ClaudeProvider: UsageProvider {
     /// `Fmt.countdown`. Roughly 1970±200 years.
     private static let plausibleEpochRange = -6_311_433_600.0...6_311_433_600.0
 
-    /// `JSONSerialization` turns `true`/`false` into `NSNumber`s, and `NSNumber as? Double` happily
-    /// yields 1.0 and 0.0 — so without this check `{"percent": true}` reads as 1% and
-    /// `{"resets_at": false}` as 1 January 1970. Comparing the CoreFoundation type id is the only
-    /// reliable discriminator: `as? Bool` is no good, because `NSNumber(42) as? Bool` also succeeds.
-    private static func isBoolean(_ any: Any) -> Bool {
-        CFGetTypeID(any as CFTypeRef) == CFBooleanGetTypeID()
-    }
-
     private static func date(_ any: Any?) -> Date? {
-        guard let any, !isBoolean(any) else { return nil }
+        // See `isJSONBoolean`: without this, `{"resets_at": false}` parses as 1 January 1970.
+        guard let any, !isJSONBoolean(any) else { return nil }
         if let seconds = any as? Double {
             guard seconds.isFinite, plausibleEpochRange.contains(seconds) else { return nil }
             return Date(timeIntervalSince1970: seconds)

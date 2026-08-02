@@ -74,14 +74,24 @@ enum Notifier {
         "notified.\(window.label)"
     }
 
-    /// Identifies the reset period currently in effect. Falls back to the UTC day when the endpoint
-    /// omits `resets_at`: a constant there meant such a window was announced once and then stayed
-    /// silent forever, across relaunches, instead of once per period.
+    /// Identifies the reset period currently in effect.
+    ///
+    /// Quantized to the minute, and that is the whole point: the endpoint re-stamps `resets_at` on
+    /// every request. Three polls twenty seconds apart returned the same reset instant with
+    /// fractional seconds .516073, .880178 and .202674. Keyed on the raw timestamp, every poll looked
+    /// like a fresh period and anyone above their threshold was alerted on every single poll.
+    ///
+    /// Rounded rather than truncated so a reset that drifts across a boundary (observed: 16:39:59
+    /// creeping to 16:40:00 over two hours) doesn't flip buckets. Distinct periods are at least five
+    /// hours apart — the shortest window Claude reports — so a minute-wide bucket cannot merge two.
+    ///
+    /// Falls back to the UTC day when the endpoint omits `resets_at`: a constant there meant such a
+    /// window was announced once and then stayed silent forever, across relaunches.
     private static func periodID(for window: LimitWindow, now: Date) -> String {
         guard let resetsAt = window.resetsAt else {
             return "day-\(Int((now.timeIntervalSince1970 / 86_400).rounded(.down)))"
         }
-        return "\(resetsAt.timeIntervalSince1970)"
+        return "m\(Int((resetsAt.timeIntervalSince1970 / 60).rounded()))"
     }
 
     private struct Marker {
@@ -115,7 +125,7 @@ enum Notifier {
         content.title = "\(window.shortLabel) at \(Fmt.pct(window.utilization))"
         content.body = window.resetsAt == nil
             ? "Past your \(threshold)% alert."
-            : "Resets \(Fmt.clock(window.resetsAt)) — in \(Fmt.countdown(to: window.resetsAt))."
+            : Fmt.resetLine(for: window.resetsAt)
         content.sound = .default
 
         let request = UNNotificationRequest(

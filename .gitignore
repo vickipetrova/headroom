@@ -3,6 +3,9 @@ build/
 *.dmg
 .DS_Store
 
+# Scratch worktrees created by agent tooling
+.claude/
+
 # Local working materials, not part of the published repo
 HEADROOM_PLAN.md
 claude-usage-bar.zip

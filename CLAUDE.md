@@ -8,9 +8,13 @@ Notes for Claude Code sessions working in this repo.
 swift test --disable-xctest       # the whole suite, ~0.05s
 ./build.sh                        # -> build/Headroom.app (universal, ad-hoc signed)
 ./build.sh --dmg                  # also -> build/Headroom.dmg
+./build.sh --dmg-only             # DMG around the existing app, without rebuilding it
 open build/Headroom.app
 pkill -f "MacOS/Headroom"         # stop it (menu bar app; there's no window to close)
 ```
+
+`--dmg-only` is what the release procedure uses: the app is signed with a Developer ID, notarized and
+stapled before it goes into the image, and rebuilding at that point would throw all of that away.
 
 `swift run` does not work and is not meant to — it produces a bare binary with no `Info.plist`, so
 `LSUIElement`, `SMAppService.mainApp`, and notification registration all misbehave.
@@ -25,7 +29,7 @@ There is no Xcode project. SwiftPM compiles the sources and `build.sh` wraps the
 | `Sources/HeadroomCore/AppDelegate.swift` | Wires provider → menu, owns the poll timer and the 60s countdown tick, refreshes on wake. The **only** public symbol in the module |
 | `Sources/HeadroomCore/MenuController.swift` | The status item: menu bar title, dropdown, Settings submenu. Knows nothing about where usage comes from |
 | `Sources/HeadroomCore/UsageAPI.swift` | `LimitWindow` model, `UsageProvider` protocol, `ClaudeProvider` (endpoint client + all response parsing) |
-| `Sources/HeadroomCore/Credentials.swift` | Token discovery: credentials file, then login Keychain |
+| `Sources/HeadroomCore/Credentials.swift` | Token discovery across the login Keychain and the credentials file, ranked rather than first-wins |
 | `Sources/HeadroomCore/Format.swift` | Percentages, countdowns, locale-aware clock times, the colour ramp |
 | `Sources/HeadroomCore/Settings.swift` | UserDefaults-backed preferences; launch-at-login proxies `SMAppService` |
 | `Sources/HeadroomCore/Notifier.swift` | Threshold alerts, deduplicated per window per reset period |
@@ -64,20 +68,51 @@ The endpoint returns two overlapping shapes, and `ClaudeProvider.windows(in:)` r
 - **Legacy:** top-level `five_hour`, `seven_day`, `seven_day_opus` with `utilization` / `resets_at`.
   Used to fill in anything the array didn't provide, **per field**.
 
-Three traps, each with a regression test — don't "simplify" any of them:
+Four traps, each with a regression test — don't "simplify" any of them:
+
+- **`resets_at` is re-stamped on every request.** Three polls twenty seconds apart came back with
+  fractional seconds `.516073`, `.880178`, `.202674` for the same reset. `Notifier.periodID`
+  therefore quantizes to a rounded minute; keyed on the raw timestamp, every poll looked like a new
+  period and alerts fired on every single poll. Windows are ≥5 hours apart, so the bucket can never
+  merge two real periods.
 
 - **Cast `limits` to `[Any]` and filter, never to `[[String: Any]]`.** A conditional cast to an array
   of a concrete element type checks every element and yields nil if one fails, so a single
   unrecognized entry would discard the whole array instead of itself.
 - **JSON booleans bridge to `NSNumber`.** `as? Double` on `true` succeeds and gives 1.0, so
   `{"percent": true}` reads as 1% unless the CoreFoundation type id is checked. `as? Bool` is not a
-  substitute: `NSNumber(42) as? Bool` also succeeds.
+  substitute: `NSNumber(42) as? Bool` also succeeds. The shared `isJSONBoolean` guard is used by the
+  usage parser *and* by `Credentials` when reading `expiresAt`.
 - **Two ISO8601 formatters are required.** Timestamps arrive as
   `2026-08-02T16:39:59.408408+00:00`; `ISO8601DateFormatter` needs `.withFractionalSeconds` for
   those and returns nil without it, and returns nil *with* it for timestamps that lack them.
 
 Values are also clamped to 0–100 and checked for finiteness, because `Fmt.pct` converts to `Int` and
-that traps on infinity or anything past `Int`'s range.
+that traps on infinity or anything past `Int`'s range. `scope.model.display_name` is server-controlled
+and lands in a menu label, a notification title *and* a `UserDefaults` key, so it is trimmed,
+flattened, length-capped, and rejected when empty.
+
+## Credentials
+
+Two stores, and choosing between them on *presence* was a real bug: a stale
+`~/.claude/.credentials.json` shadowed the live Keychain token forever, every poll 401'd, and the
+menu advised opening a Claude Code session — which could never help, because the copy Claude Code
+refreshes was the one being ignored. `resolve(file:keychain:)` ranks instead:
+
+1. a bare token (Claude Code never writes that shape, so it's a deliberate human override)
+2. whichever `expiresAt` is later
+3. the Keychain, matching Claude Code's own precedence
+
+`expiresAt` is **milliseconds** — Claude Code writes `Date.now() + expires_in * 1000`, so a real
+value has 13 digits. It is kept as a raw `Double` and never converted to a `Date`; read as seconds it
+lands in the year 58,000.
+
+`.absent` and `.accessDenied` are distinct on purpose. Claude Code creates its Keychain item without
+`-A`/`-T`, so its ACL trusts only the creating binary and Headroom gets a permission prompt; reporting
+a denial as "you've never signed in" is wrong advice on the one path every Keychain-only user takes.
+A denial also latches, or a user who clicks Deny would be re-prompted on every poll. The lookup runs
+on a serial background queue because that prompt is modal and every `refresh()` caller is the main
+thread.
 
 ## Testing
 

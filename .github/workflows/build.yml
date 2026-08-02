@@ -35,6 +35,9 @@ jobs:
           # `swift build -c release` compiles with -g by default; without -debug-info-format none the
           # binary carries a debug map full of absolute paths from the build machine.
           test "$(nm -a "$BIN" | grep -c OSO)" -eq 0
+          # Everything above passes just as well on a bundle macOS won't start. The signature is the
+          # property that actually gates launch on Apple Silicon, and nothing else here looks at it.
+          codesign --verify --verbose build/Headroom.app
 
       - name: Check nothing logs the token
         run: |

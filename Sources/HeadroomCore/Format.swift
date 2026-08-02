@@ -56,6 +56,13 @@ enum Fmt {
         return formatter.string(from: date)
     }
 
+    /// The one place this sentence is written. It used to exist separately in the dropdown and in
+    /// notification bodies, and the two had already drifted — one carried a trailing full stop.
+    static func resetLine(for date: Date?, from now: Date = Date()) -> String {
+        guard date != nil else { return "Reset time unknown" }
+        return "Resets \(clock(date, from: now)) — in \(countdown(to: date, from: now))"
+    }
+
     static func color(_ utilization: Double) -> NSColor {
         switch utilization {
         case ..<50: return .systemGreen

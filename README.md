@@ -27,13 +27,16 @@ Authorization: Bearer <your Claude Code token>
 anthropic-beta: oauth-2025-04-20
 ```
 
-The token comes from wherever Claude Code keeps it, in this order:
-
-1. `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`
-2. The macOS login Keychain, generic password, service `Claude Code-credentials`
+The token comes from wherever Claude Code keeps it — the macOS login Keychain (generic password,
+service `Claude Code-credentials`) or `~/.claude/.credentials.json`. If both exist, Headroom uses
+whichever one lives longest, so a leftover file can't shadow your live login.
 
 Claude Code refreshes that token itself while you work, so there is nothing to maintain. If it has
 gone stale because you haven't opened Claude Code in a while, the menu says so.
+
+The first Keychain read prompts for permission, because Claude Code's Keychain item only trusts the
+app that created it. Note that "Always Allow" won't stick across a rebuild if you built from source —
+ad-hoc signatures change every time, so macOS sees a different app.
 
 Because this is account-level data rather than session lifecycle, it keeps working when Claude Code
 is closed.
@@ -58,7 +61,8 @@ open /Applications/Headroom.app
 ```
 
 That's the whole toolchain: the Xcode Command Line Tools. No Xcode project, no third-party
-dependencies. Tests run with `swift test`.
+dependencies. Tests run with `swift test --disable-xctest` — plain `swift test` needs XCTest, which
+the Command Line Tools don't ship.
 
 `swift run` won't work, and that's expected — it produces a bare binary with no `Info.plist`, so
 there's no `LSUIElement`, no bundle identity for login items, and no notification registration.
@@ -75,7 +79,9 @@ Applications.
 - **A Claude Pro or Max plan.** Session and weekly windows are plan quotas. Metered API-key
   accounts don't have them, so there is nothing for Headroom to show — it says so plainly instead
   of showing zeroes.
-- **Claude Code, signed in at least once**, so there's a token to read.
+- **Claude Code, signed in at least once**, so there's a token to read. If you set
+  `CLAUDE_CONFIG_DIR`, Headroom won't find your login — Claude Code moves both the credentials file
+  and the Keychain service name to match, and an app launched from Finder can't see that variable.
 
 ## Settings
 

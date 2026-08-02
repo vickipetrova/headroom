@@ -39,7 +39,37 @@ First release.
 
 ### Fixed
 
-Found while building the test suite, before first release:
+Found in a pre-release code review, before first release:
+
+- **Alerts fired on every poll instead of once per window.** The usage endpoint re-stamps
+  `resets_at` on every request — three polls twenty seconds apart returned the same reset instant
+  with fractional seconds `.516073`, `.880178`, `.202674`. Because the alert marker was keyed on that
+  exact timestamp, every poll looked like a fresh period, so anyone over their threshold would have
+  been notified twelve times an hour, forever. The period is now quantized to the minute.
+- **A leftover credentials file could permanently shadow your live login.** Headroom picked the first
+  store that had *anything* in it, so a stale `~/.claude/.credentials.json` — from an older Claude
+  Code, a restored backup, or synced dotfiles — hid the Keychain token Claude Code was actively
+  refreshing. Every poll failed and the menu advised opening a Claude Code session, which could never
+  fix it. Headroom now compares expiry timestamps and uses whichever credential lives longest.
+- **"Access denied" was reported as "you've never signed in."** Claude Code's Keychain item only
+  trusts the app that created it, so Headroom is prompted for access; declining produced advice that
+  couldn't help. It now says what actually happened, and asks once rather than on every poll.
+- **The Keychain read could freeze the menu bar.** It ran on the main thread, and it can put a modal
+  permission dialog on screen.
+- **The bearer token could have followed a redirect to another host.** The connection now refuses
+  redirects outright, so "one network destination" is enforced rather than merely documented.
+- **A slow refresh could overwrite newer data with older**, timestamped as if it were current.
+- **A model name reported by the server flowed unbounded into the menu, notifications and stored
+  preferences.** It is now trimmed, length-capped, and an empty one no longer renders "THIS WEEK ()".
+- **The documented release procedure discarded its own notarization.** It rebuilt the app after
+  signing and stapling, replacing both with an ad-hoc signature before packaging the DMG. `build.sh`
+  gained `--dmg-only` for that step.
+- Tagging a release no longer skips the test suite, and a tag that disagrees with the version in
+  `build.sh` now fails the release build instead of shipping a mislabeled app.
+- A failed ad-hoc signature is no longer swallowed by the build script — on Apple Silicon that
+  produced an app that died at launch with the real error discarded.
+
+Found while building the test suite:
 
 - **A single unrecognized entry in the endpoint's `limits` array discarded every other entry.**
   Casting to an array of a concrete element type checks all elements and yields nothing if one

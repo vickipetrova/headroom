@@ -50,10 +50,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         pollTimer = schedule(every: Settings.refreshInterval) { [weak self] in self?.refresh() }
     }
 
+    /// Bumped for every fetch, captured by that fetch's completion, and compared when it lands.
+    ///
+    /// Without it a slow poll can finish *after* a later one and overwrite fresh numbers with older
+    /// ones — stamped `updatedAt: Date()`, so they'd claim to be current. Mashing Refresh Now stacks
+    /// requests the same way.
+    private var fetchGeneration = 0
+
     private func refresh() {
+        fetchGeneration += 1
+        let generation = fetchGeneration
         provider.fetch { [weak self] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, generation == self.fetchGeneration else { return }
                 switch result {
                 case .success(let windows):
                     self.menuController.update(windows: windows, updatedAt: Date())

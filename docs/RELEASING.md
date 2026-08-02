@@ -54,9 +54,10 @@ xcrun notarytool submit build/app-notarize.zip --keychain-profile "headroom" --w
 xcrun stapler staple build/Headroom.app
 rm build/app-notarize.zip
 
-# Repackage the DMG around the now-signed app, then sign and notarize the image itself —
-# that's the check a downloader actually hits.
-./build.sh --dmg
+# Package the DMG around the now-signed app, then sign and notarize the image itself — that's the
+# check a downloader actually hits. --dmg-only, NOT --dmg: rebuilding here would recompile the app
+# and re-sign it ad-hoc, throwing away the Developer ID signature and the ticket just stapled to it.
+./build.sh --dmg-only
 codesign --force --timestamp --sign "$SIGN_ID" build/Headroom.dmg
 xcrun notarytool submit build/Headroom.dmg --keychain-profile "headroom" --wait
 xcrun stapler staple build/Headroom.dmg

@@ -174,6 +174,32 @@ struct DefaultsBacked {
             #expect(recorder.count == 0)
         }
 
+        /// Regression, and the one that matters most: the endpoint re-stamps `resets_at` on every
+        /// request. Three real polls 20 seconds apart came back with fractional seconds .516073,
+        /// .880178, .202674 — the same reset instant, restamped. Keying the period on the raw
+        /// timestamp made every poll look like a new period, so anyone over the threshold was
+        /// alerted on *every poll*: twelve an hour at the default interval.
+        ///
+        /// Every other test in this suite passed throughout, because each one builds a single `Date`
+        /// and reuses it — self-consistent, and wrong about the server.
+        @Test func restampedResetTimeIsStillTheSamePeriod() {
+            Settings.notifyThreshold = 80
+            for fraction in [0.516073, 0.880178, 0.202674] {
+                let restamped = Date(timeIntervalSince1970: 1_785_688_800 + fraction)
+                Notifier.evaluate([window(85, resetsAt: restamped)], now: now)
+            }
+            #expect(recorder.count == 1)
+        }
+
+        /// The flip side: a genuinely different period must still get through. Windows are at least
+        /// five hours apart, so quantizing the period can never merge two real ones.
+        @Test func quantizingDoesNotSwallowARealNewPeriod() {
+            Settings.notifyThreshold = 80
+            Notifier.evaluate([window(85, resetsAt: reset)], now: now)
+            Notifier.evaluate([window(85, resetsAt: reset.addingTimeInterval(300))], now: now)
+            #expect(recorder.count == 2)
+        }
+
         /// Regression: with no reset time the marker used to be a constant, so a window was
         /// announced once and then stayed silent forever, across relaunches. It should still be once
         /// per period — falling back to the day when the endpoint won't say.
