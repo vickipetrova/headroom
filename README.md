@@ -115,16 +115,22 @@ decline — or later switch Headroom off in System Settings › Notifications �
 
 ## Roadmap
 
-Deliberately small for v0.1. Not planned by me, but very welcome as contributions — these are
-filed as [good first issues](../../issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22):
+Deliberately small for v0.1. Not planned by me, but very welcome as contributions — each of these is
+[an open issue](../../issues) with the design questions written out:
 
-- Multiple accounts in one menu
-- A historical sparkline of the session window
-- Reading usage from Claude Code's statusline stdin instead of polling
-- A configurable menu bar title format
-- A model-scoped-only mode (show just the Opus/Fable weekly line)
-- Graceful mode for non-Pro/Max accounts
-- Additional providers — Cursor, Codex, Copilot — behind the existing `UsageProvider` protocol
+- A historical sparkline of the session window — [#2](../../issues/2)
+- Graceful mode for non-Pro/Max accounts — [#5](../../issues/5)
+- Reading usage from Claude Code's statusline stdin instead of polling — [#6](../../issues/6)
+- Additional providers — Cursor, Codex, Copilot — behind the existing `UsageProvider` protocol — [#1](../../issues/1)
+- Multiple accounts in one menu — [#12](../../issues/12)
+
+The first two are tagged
+[good first issue](../../issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22); the rest are
+[help wanted](../../issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22), meaning they need a
+design decision agreed in the issue before much code gets written.
+
+Already shipped, and no longer on the list: a configurable menu bar title format and a
+model-scoped-only mode, both of which the *Show in Menu Bar* setting covers.
 
 Out of scope: cost dashboards, telemetry, anything needing an API key. See
 [CONTRIBUTING.md](CONTRIBUTING.md).
