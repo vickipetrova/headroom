@@ -18,7 +18,7 @@ First release.
 - **Zero-setup authentication.** Reads the OAuth token Claude Code already holds, from
   `~/.claude/.credentials.json` or the login Keychain. Nothing to paste, no cookies, no DevTools.
 - **Per-model weekly limits.** The usage endpoint's `limits` array reports model-scoped windows
-  that name their own model, so the third row reads "THIS WEEK (Opus)" or "THIS WEEK (Fable)"
+  that name their own model, so the third row reads "WEEKLY · OPUS" or "WEEKLY · FABLE"
   according to what your plan actually reports. Falls back to the older `five_hour` /
   `seven_day` / `seven_day_opus` keys per field if the array is absent.
 - **Show in Menu Bar** — choose which limits appear in the menu bar title. The list is built from

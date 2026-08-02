@@ -60,23 +60,28 @@ struct UsageRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
+            // `.callout` rather than `.caption` throughout the small text: caption is 10pt on macOS,
+            // which is genuinely hard to read for something you glance at. The heading additionally
+            // takes semibold and the full label colour — at secondary it read as disabled, which is
+            // the exact impression this panel was redesigned to shed.
             HStack(spacing: 8) {
                 Text(row.header)
+                    .font(.callout.weight(.semibold))
                 Spacer(minLength: 8)
                 Text(row.headerTrailing)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(row.value)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     // Monospaced digits for the same reason the menu bar title uses them: the number
                     // must not shuffle sideways as it ticks over.
                     .monospacedDigit()
                 Spacer(minLength: 8)
                 Text(row.trailing)
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
@@ -117,7 +122,7 @@ struct PanelTextView: View {
 
     var body: some View {
         Text(text)
-            .font(.caption)
+            .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)  // wrap instead of truncating
             // Bounded, or a long error line lays out at its natural width and drags the whole menu
@@ -147,10 +152,14 @@ enum PanelMetrics {
 
     /// How wide message text is allowed to lay out before wrapping.
     ///
-    /// Tracks the *measured* natural width of a usage row (240pt) rather than `minimumWidth`, so a
-    /// wrapped error line ends where the rows end instead of leaving a column of dead space under
-    /// full-width separators. If the row content changes enough to move that 240, move this too.
-    static var textWrapWidth: CGFloat { 240 - horizontalPadding * 2 }
+    /// Tracks the *measured* natural width of a usage row rather than `minimumWidth`, so a wrapped
+    /// error line ends where the rows end instead of leaving a column of dead space under full-width
+    /// separators.
+    ///
+    /// 258pt is what the widest row (the weekly heading plus its reset time) measures at the current
+    /// type sizes — it was 240 before the small text moved from `.caption` to `.callout`. Any change
+    /// to the row's fonts or copy moves this number; re-measure rather than guessing.
+    static var textWrapWidth: CGFloat { 258 - horizontalPadding * 2 }
 }
 
 // MARK: - Hosting

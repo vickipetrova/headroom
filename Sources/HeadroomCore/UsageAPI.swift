@@ -264,7 +264,7 @@ struct ClaudeProvider: UsageProvider {
 
     private static func weeklyWindow(utilization: Double, resetsAt: Date?) -> LimitWindow {
         LimitWindow(kind: .weekly, id: LimitWindow.weeklyID,
-                    label: "THIS WEEK · ALL MODELS", shortLabel: "This week",
+                    label: "WEEKLY · ALL MODELS", shortLabel: "Weekly",
                     optionLabel: "Weekly (all models)",
                     utilization: utilization, resetsAt: resetsAt)
     }
@@ -272,8 +272,8 @@ struct ClaudeProvider: UsageProvider {
     private static func scopedWindow(model: String, utilization: Double,
                                      resetsAt: Date?) -> LimitWindow {
         LimitWindow(kind: .weeklyScoped, id: LimitWindow.scopedID(model: model),
-                    label: "THIS WEEK · \(model.uppercased())",
-                    shortLabel: "This week (\(model))",
+                    label: "WEEKLY · \(model.uppercased())",
+                    shortLabel: "Weekly (\(model))",
                     optionLabel: model,
                     utilization: utilization, resetsAt: resetsAt)
     }

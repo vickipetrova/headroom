@@ -66,9 +66,9 @@ import Testing
 
     @Test func headingComesStraightFromTheWindowLabel() {
         let scoped = LimitWindow(kind: .weeklyScoped, id: "scoped:Fable",
-                                 label: "THIS WEEK · FABLE", shortLabel: "This week (Fable)", optionLabel: "opt",
+                                 label: "WEEKLY · FABLE", shortLabel: "Weekly (Fable)", optionLabel: "opt",
                                  utilization: 16, resetsAt: now.addingTimeInterval(3_600))
-        #expect(UsageRow(scoped, now: now, mode: .alertsOnly).header == "THIS WEEK · FABLE")
+        #expect(UsageRow(scoped, now: now, mode: .alertsOnly).header == "WEEKLY · FABLE")
     }
 
     /// The bar's colour is resolved in the view model, so it is covered by the same tests as the

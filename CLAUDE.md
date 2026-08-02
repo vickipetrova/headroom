@@ -67,7 +67,7 @@ The endpoint returns two overlapping shapes, and `ClaudeProvider.windows(in:)` r
 
 - **Preferred:** a `limits` array of `{kind, percent, resets_at, scope}` where `kind` is `session`,
   `weekly_all`, or `weekly_scoped`. Scoped entries name their own model in
-  `scope.model.display_name`, which is why the third row says "THIS WEEK (Fable)" rather than
+  `scope.model.display_name`, which is why the third row says "WEEKLY · FABLE" rather than
   hardcoding Opus.
 - **Legacy:** top-level `five_hour`, `seven_day`, `seven_day_opus` with `utilization` / `resets_at`.
   Used to fill in anything the array didn't provide, **per field**.

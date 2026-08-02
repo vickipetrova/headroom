@@ -49,16 +49,16 @@ import Testing
         let result = try windows(Self.current)
         #expect(result[0].label == "SESSION · 5-HOUR")
         #expect(result[0].shortLabel == "Session")
-        #expect(result[1].label == "THIS WEEK · ALL MODELS")
-        #expect(result[1].shortLabel == "This week")
+        #expect(result[1].label == "WEEKLY · ALL MODELS")
+        #expect(result[1].shortLabel == "Weekly")
     }
 
     /// The reason for reading `limits[]` at all: the scoped window names its own model, so the app
     /// doesn't hardcode "Opus" and silently mislabel a different one.
     @Test func scopedLabelUsesTheReportedModelName() throws {
         let result = try windows(Self.current)
-        #expect(result[2].label == "THIS WEEK · FABLE")
-        #expect(result[2].shortLabel == "This week (Fable)")
+        #expect(result[2].label == "WEEKLY · FABLE")
+        #expect(result[2].shortLabel == "Weekly (Fable)")
         // The Show in Menu Bar row is the provider's copy too, so a model is offered by its own
         // name. Mutating this to a constant otherwise passes every test while every scoped row in
         // that submenu silently reads the same.
