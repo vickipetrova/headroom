@@ -9,8 +9,10 @@ Your Claude Code plan usage, in the macOS menu bar:
 Session (5-hour window) on the left, this week on the right. Click for reset times, live
 countdowns, and per-model weekly limits when your plan reports them.
 
-<!-- Replace with the hero GIF (menu bar + open dropdown) once recorded. -->
+<!-- HERO GIF: record the menu bar with the dropdown open, save it as assets/headroom.gif,
+     and uncomment the line below.
 <img src="assets/headroom.gif" alt="Headroom in the menu bar, with the dropdown open" width="420">
+-->
 
 **Zero setup.** No cookies, no DevTools, nothing to paste. Headroom reads the OAuth token Claude
 Code already has and asks Anthropic the same question `/usage` does.
