@@ -93,33 +93,37 @@ final class MenuController: NSObject, NSMenuDelegate {
     private func renderTitle() {
         guard let button = statusItem.button else { return }
 
+        // The spark is an image rather than a character in the title so that System mode can hand it
+        // to macOS as a template and have it adapt exactly like a built-in menu bar control —
+        // including inverting when the item is highlighted, which coloured text does not do.
+        button.image = Fmt.sparkImage(mode: Settings.colorMode)
+        button.imagePosition = .imageLeading
+
         guard !windows.isEmpty else {
             button.attributedTitle = NSAttributedString()
-            if lastError != nil { button.title = "✻ !" }
+            if lastError != nil { button.title = "!" }
             // A clean fetch that reported nothing isn't an error and isn't still loading —
             // API-key accounts have no plan quota to report.
-            else if lastUpdated != nil { button.title = "✻ –" }
-            else { button.title = "✻ …" }
+            else if lastUpdated != nil { button.title = "–" }
+            else { button.title = "…" }
             return
         }
 
+        let mode = Settings.colorMode
         let title = NSMutableAttributedString()
-        title.append(NSAttributedString(string: "✻ ", attributes: [
-            .foregroundColor: Fmt.spark,
-            .font: NSFont.systemFont(ofSize: 13),
-        ]))
-        title.append(percentage(of: windows.first { $0.kind == .session }))
+        title.append(percentage(of: windows.first { $0.kind == .session }, mode: mode))
         title.append(NSAttributedString(string: " · ", attributes: [
             .foregroundColor: NSColor.secondaryLabelColor,
         ]))
-        title.append(percentage(of: windows.first { $0.kind == .weekly }))
+        title.append(percentage(of: windows.first { $0.kind == .weekly }, mode: mode))
         button.attributedTitle = title
     }
 
-    private func percentage(of window: LimitWindow?) -> NSAttributedString {
+    private func percentage(of window: LimitWindow?, mode: Settings.ColorMode) -> NSAttributedString {
         // Monospaced digits so the title doesn't shuffle sideways as the numbers tick over.
         NSAttributedString(string: Fmt.pct(window?.utilization), attributes: [
-            .foregroundColor: window.map { Fmt.color($0.utilization) } ?? NSColor.secondaryLabelColor,
+            .foregroundColor: window.map { Fmt.color($0.utilization, mode: mode, role: .title) }
+                ?? NSColor.secondaryLabelColor,
             .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
         ])
     }
@@ -218,6 +222,16 @@ final class MenuController: NSObject, NSMenuDelegate {
         }
 
         submenu.addItem(.separator())
+        submenu.addItem(header("COLORS"))
+        for (index, mode) in Settings.ColorMode.allCases.enumerated() {
+            let item = action(mode.label, key: "", selector: #selector(setColorMode(_:)))
+            // Tagged by position rather than by raw value, since the raw values are strings.
+            item.tag = index
+            item.state = Settings.colorMode == mode ? .on : .off
+            submenu.addItem(item)
+        }
+
+        submenu.addItem(.separator())
         let launch = action("Launch at Login", key: "", selector: #selector(toggleLaunchAtLogin))
         launch.state = Settings.launchAtLogin ? .on : .off
         submenu.addItem(launch)
@@ -235,6 +249,15 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     @objc private func setThreshold(_ sender: NSMenuItem) {
         Settings.notifyThreshold = sender.tag
+        onSettingsChanged?()
+    }
+
+    @objc private func setColorMode(_ sender: NSMenuItem) {
+        guard Settings.ColorMode.allCases.indices.contains(sender.tag) else { return }
+        Settings.colorMode = Settings.ColorMode.allCases[sender.tag]
+        // Repaints the menu bar immediately; the dropdown picks it up on its next open, which is
+        // after this click dismisses it anyway.
+        renderTitle()
         onSettingsChanged?()
     }
 

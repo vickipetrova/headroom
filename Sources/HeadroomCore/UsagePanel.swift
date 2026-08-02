@@ -26,12 +26,19 @@ struct UsageRow {
     /// 0...1, for the bar.
     let fraction: Double
 
+    /// Resolved here rather than in the view, so the bar's colour is covered by the same tests as
+    /// the menu bar title's and the two can't drift apart.
+    let barColor: NSColor
+
     /// The whole row as one sentence, for VoiceOver and for the menu item's `title` — which is what
     /// AppleScript reports, since a view-backed item draws no title of its own. Derived here so the
     /// two can't drift into describing the same row differently.
     var spoken: String { "\(header), \(value) used, \(trailing)" }
 
-    init(_ window: LimitWindow, now: Date = Date()) {
+    init(_ window: LimitWindow,
+         now: Date = Date(),
+         mode: Settings.ColorMode = Settings.colorMode) {
+        barColor = Fmt.color(window.utilization, mode: mode, role: .bar)
         header = window.label
         headerTrailing = window.resetsAt.map { Fmt.clock($0, from: now) } ?? ""
         value = Fmt.pct(window.utilization)
@@ -72,7 +79,7 @@ struct UsageRowView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ProgressBar(fraction: row.fraction)
+            ProgressBar(fraction: row.fraction, color: row.barColor)
         }
         .padding(.horizontal, PanelMetrics.horizontalPadding)
         .padding(.vertical, 7)
@@ -86,6 +93,7 @@ struct UsageRowView: View {
 
 private struct ProgressBar: View {
     let fraction: Double
+    let color: NSColor
 
     var body: some View {
         // GeometryReader rather than a fixed inner width, so the fill tracks the panel width if
@@ -94,7 +102,7 @@ private struct ProgressBar: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color(nsColor: .quaternaryLabelColor))
                 Capsule()
-                    .fill(Color(nsColor: Fmt.spark))
+                    .fill(Color(nsColor: color))
                     .frame(width: max(0, geometry.size.width * fraction))
             }
         }

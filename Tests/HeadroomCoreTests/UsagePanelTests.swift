@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -68,6 +69,18 @@ import Testing
                                  label: "THIS WEEK · FABLE", shortLabel: "This week (Fable)",
                                  utilization: 16, resetsAt: now.addingTimeInterval(3_600))
         #expect(UsageRow(scoped, now: now).header == "THIS WEEK · FABLE")
+    }
+
+    /// The bar's colour is resolved in the view model, so it is covered by the same tests as the
+    /// menu bar title rather than only being visible on screen.
+    @Test func barColourFollowsTheMode() {
+        #expect(UsageRow(window(20, resetsIn: 60), now: now, mode: .alertsOnly).barColor == Fmt.spark)
+        #expect(UsageRow(window(85, resetsIn: 60), now: now, mode: .alertsOnly).barColor == .systemRed)
+        // System mode is monochrome at every level, including one that would be red otherwise.
+        #expect(UsageRow(window(20, resetsIn: 60), now: now, mode: .system).barColor
+            == .secondaryLabelColor)
+        #expect(UsageRow(window(85, resetsIn: 60), now: now, mode: .system).barColor
+            == .secondaryLabelColor)
     }
 
     /// One sentence, used both as the VoiceOver label and as the menu item's `title` — the latter

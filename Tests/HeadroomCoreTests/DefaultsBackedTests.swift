@@ -282,6 +282,25 @@ struct DefaultsBacked {
             #expect(Settings.notifyThreshold == 80)
         }
 
+        @Test func colourModeDefaultsToAlertsOnly() {
+            #expect(Settings.colorMode == .alertsOnly)
+        }
+
+        @Test(arguments: Settings.ColorMode.allCases)
+        func offeredColourModesAreKept(_ mode: Settings.ColorMode) {
+            Settings.colorMode = mode
+            #expect(Settings.colorMode == mode)
+        }
+
+        /// Same rule as the two settings above: a value we don't recognise — a hand-edited plist, or
+        /// a mode removed in a later version — falls back rather than leaving the app in a mode that
+        /// no longer exists.
+        @Test(arguments: ["", "rainbow", "System", "alertsonly"])
+        func anUnknownStoredColourModeFallsBack(_ stored: String) {
+            defaults.set(stored, forKey: "colorMode")
+            #expect(Settings.colorMode == .alertsOnly)
+        }
+
         // `Settings.launchAtLogin` is deliberately never touched: its setter registers a real login
         // item with macOS, which from a test process would point at the test binary.
     }

@@ -82,9 +82,51 @@ enum Fmt {
         return "Resets \(clock(date, from: now)) — in \(countdown(to: date, from: now))"
     }
 
-    static func color(_ utilization: Double) -> NSColor {
+    /// The spark for the menu bar, drawn as an image rather than set as a character in the title.
+    ///
+    /// In `.system` mode the image is a *template*: macOS then draws it in whatever colour a
+    /// built-in menu bar control would use, which means it inverts correctly when the item is
+    /// highlighted and follows the menu bar between light and dark. Coloured text does none of that.
+    /// In `.alertsOnly` the glyph is baked in the brand orange and is not a template, so it keeps its
+    /// colour — the same `isTemplate = (color == nil)` split the reference project uses.
+    ///
+    /// Rebuilt per render rather than cached: it is one small glyph a few times a minute, and a
+    /// cache would have to be invalidated on both mode changes and appearance changes.
+    static func sparkImage(mode: Settings.ColorMode) -> NSImage {
+        let glyph = "✻" as NSString
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13),
+            .foregroundColor: mode == .system ? NSColor.labelColor : spark,
+        ]
+        let size = glyph.size(withAttributes: attributes)
+        let image = NSImage(size: NSSize(width: ceil(size.width), height: ceil(size.height)))
+        image.lockFocus()
+        glyph.draw(at: .zero, withAttributes: attributes)
+        image.unlockFocus()
+        image.isTemplate = mode == .system
+        return image
+    }
+
+    /// Which surface is being coloured. The two differ only in the calm state, where the number
+    /// takes the ordinary label colour and the bar takes the brand orange — one function can't serve
+    /// both without being told which it is colouring.
+    enum ColorRole {
+        case title
+        case bar
+    }
+
+    /// The single place utilization becomes a colour, for the menu bar title and the panel's bars
+    /// alike, so the two can never disagree about what 80% looks like.
+    static func color(_ utilization: Double,
+                      mode: Settings.ColorMode,
+                      role: ColorRole) -> NSColor {
+        // `.system` ignores utilization entirely. That is not a missing branch — "fully monochrome"
+        // means the thresholds don't apply, so the menu bar item looks like every other one up there.
+        guard mode == .alertsOnly else {
+            return role == .title ? .labelColor : .secondaryLabelColor
+        }
         switch utilization {
-        case ..<50: return .systemGreen
+        case ..<50: return role == .title ? .labelColor : spark
         case ..<80: return .systemYellow
         default: return .systemRed
         }

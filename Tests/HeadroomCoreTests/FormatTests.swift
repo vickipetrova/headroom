@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -137,15 +138,69 @@ import Testing
         #expect(withWeekday.count > bare.count)
     }
 
-    // MARK: - Colour ramp
+    // MARK: - Colour modes
 
-    /// Asserted relationally rather than against `NSColor` identity: what the README promises is
-    /// where the bands change, not which catalogue colour each one is.
-    @Test func colourRampChangesAtFiftyAndEighty() {
-        #expect(Fmt.color(0) == Fmt.color(49.9))
-        #expect(Fmt.color(50) != Fmt.color(49.9))
-        #expect(Fmt.color(50) == Fmt.color(79.9))
-        #expect(Fmt.color(80) != Fmt.color(79.9))
-        #expect(Fmt.color(80) == Fmt.color(100))
+    private func title(_ u: Double, _ mode: Settings.ColorMode) -> NSColor {
+        Fmt.color(u, mode: mode, role: .title)
+    }
+
+    private func bar(_ u: Double, _ mode: Settings.ColorMode) -> NSColor {
+        Fmt.color(u, mode: mode, role: .bar)
+    }
+
+    /// Asserted relationally rather than against `NSColor` identity — these are dynamic catalogue
+    /// colours, and what matters is *where* the bands change, not which colour each one is.
+    @Test func alertsOnlyChangesBandAtFiftyAndEighty() {
+        for role in [Fmt.ColorRole.title, .bar] {
+            let c = { (u: Double) in Fmt.color(u, mode: .alertsOnly, role: role) }
+            #expect(c(0) == c(49.9))
+            #expect(c(50) != c(49.9))
+            #expect(c(50) == c(79.9))
+            #expect(c(80) != c(79.9))
+            #expect(c(80) == c(100))
+        }
+    }
+
+    /// The point of the default: below the first threshold nothing is tinted for severity. The
+    /// number takes the ordinary label colour and only the bar carries the brand.
+    @Test func alertsOnlyIsCalmBelowFifty() {
+        #expect(title(0, .alertsOnly) == .labelColor)
+        #expect(title(49.9, .alertsOnly) == .labelColor)
+        #expect(bar(0, .alertsOnly) == Fmt.spark)
+        #expect(bar(49.9, .alertsOnly) == Fmt.spark)
+        // …and the two surfaces genuinely differ while calm, which is why the role exists.
+        #expect(title(0, .alertsOnly) != bar(0, .alertsOnly))
+    }
+
+    /// Above the thresholds both surfaces agree, so a red number never sits over an orange bar.
+    @Test func alertsOnlyAgreesAcrossSurfacesWhenItMatters() {
+        #expect(title(50, .alertsOnly) == bar(50, .alertsOnly))
+        #expect(title(80, .alertsOnly) == bar(80, .alertsOnly))
+        #expect(title(100, .alertsOnly) == bar(100, .alertsOnly))
+    }
+
+    /// "Fully monochrome" has to mean the thresholds stop applying, not merely that the calm colours
+    /// changed — otherwise System mode still goes red at 80% and isn't monochrome at all.
+    @Test(arguments: [0.0, 49.9, 50.0, 79.9, 80.0, 100.0])
+    func systemModeIgnoresUtilizationEntirely(_ utilization: Double) {
+        #expect(title(utilization, .system) == .labelColor)
+        #expect(bar(utilization, .system) == .secondaryLabelColor)
+    }
+
+    @Test func systemModeUsesNoBrandOrAlertColour() {
+        for u in [0.0, 60.0, 95.0] {
+            #expect(title(u, .system) != Fmt.spark)
+            #expect(title(u, .system) != .systemRed)
+            #expect(bar(u, .system) != Fmt.spark)
+            #expect(bar(u, .system) != .systemRed)
+        }
+    }
+
+    /// The spark is a template only in System mode — that is what lets macOS invert it on highlight
+    /// and follow the menu bar between appearances, which a colour-baked image cannot do.
+    @Test func sparkIsATemplateOnlyInSystemMode() {
+        #expect(Fmt.sparkImage(mode: .system).isTemplate)
+        #expect(!Fmt.sparkImage(mode: .alertsOnly).isTemplate)
+        #expect(Fmt.sparkImage(mode: .system).size.width > 0)
     }
 }
