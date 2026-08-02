@@ -17,7 +17,10 @@ struct LimitWindow {
     }
 
     let kind: Kind
+    /// Heading for this window in the dropdown, e.g. "THIS WEEK (all models)".
     let label: String
+    /// Sentence-case form for notifications, e.g. "This week".
+    let shortLabel: String
     /// Percent of the window consumed, 0–100.
     let utilization: Double
     let resetsAt: Date?
@@ -126,16 +129,15 @@ struct ClaudeProvider: UsageProvider {
 
             switch kind {
             case "session":
-                session = LimitWindow(kind: .session, label: sessionLabel,
+                session = LimitWindow(kind: .session, label: sessionLabel, shortLabel: sessionShort,
                                       utilization: utilization, resetsAt: resetsAt)
             case "weekly_all":
-                weekly = LimitWindow(kind: .weekly, label: weeklyLabel,
+                weekly = LimitWindow(kind: .weekly, label: weeklyLabel, shortLabel: weeklyShort,
                                      utilization: utilization, resetsAt: resetsAt)
             case "weekly_scoped":
                 let model = ((entry["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
-                scoped.append(LimitWindow(kind: .weeklyScoped,
-                                          label: "THIS WEEK (\(model ?? "scoped"))",
-                                          utilization: utilization, resetsAt: resetsAt))
+                scoped.append(scopedWindow(model: model ?? "scoped",
+                                           utilization: utilization, resetsAt: resetsAt))
             default:
                 continue  // A kind we don't know yet. Ignoring it beats guessing at a label.
             }
@@ -145,23 +147,33 @@ struct ClaudeProvider: UsageProvider {
         // didn't provide, so a rename on either side degrades to a missing row rather than a
         // blank app.
         if session == nil, let legacy = legacyWindow(object["five_hour"]) {
-            session = LimitWindow(kind: .session, label: sessionLabel,
+            session = LimitWindow(kind: .session, label: sessionLabel, shortLabel: sessionShort,
                                   utilization: legacy.utilization, resetsAt: legacy.resetsAt)
         }
         if weekly == nil, let legacy = legacyWindow(object["seven_day"]) {
-            weekly = LimitWindow(kind: .weekly, label: weeklyLabel,
+            weekly = LimitWindow(kind: .weekly, label: weeklyLabel, shortLabel: weeklyShort,
                                  utilization: legacy.utilization, resetsAt: legacy.resetsAt)
         }
         if scoped.isEmpty, let legacy = legacyWindow(object["seven_day_opus"]) {
-            scoped.append(LimitWindow(kind: .weeklyScoped, label: "THIS WEEK (Opus)",
-                                      utilization: legacy.utilization, resetsAt: legacy.resetsAt))
+            scoped.append(scopedWindow(model: "Opus",
+                                       utilization: legacy.utilization, resetsAt: legacy.resetsAt))
         }
 
         return [session, weekly].compactMap { $0 } + scoped
     }
 
     private static let sessionLabel = "SESSION (5-hour window)"
+    private static let sessionShort = "Session"
     private static let weeklyLabel = "THIS WEEK (all models)"
+    private static let weeklyShort = "This week"
+
+    private static func scopedWindow(model: String, utilization: Double,
+                                     resetsAt: Date?) -> LimitWindow {
+        LimitWindow(kind: .weeklyScoped,
+                    label: "THIS WEEK (\(model))",
+                    shortLabel: "This week (\(model))",
+                    utilization: utilization, resetsAt: resetsAt)
+    }
 
     private static func legacyWindow(_ any: Any?) -> (utilization: Double, resetsAt: Date?)? {
         guard let dict = any as? [String: Any],

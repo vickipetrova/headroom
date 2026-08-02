@@ -7,6 +7,9 @@ final class MenuController: NSObject, NSMenuDelegate {
     /// Called when the user picks Refresh Now.
     var onRefresh: (() -> Void)?
 
+    /// Called when a preference changes, so the poll timer can be rescheduled.
+    var onSettingsChanged: (() -> Void)?
+
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
 
@@ -123,7 +126,61 @@ final class MenuController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(action("Refresh Now", key: "r", selector: #selector(refreshClicked)))
+        menu.addItem(settingsItem())
         menu.addItem(action("Quit Headroom", key: "q", selector: #selector(quitClicked)))
+    }
+
+    // MARK: - Settings submenu
+    //
+    // Rebuilt with the rest of the menu, so every checkmark is read fresh rather than cached —
+    // launch-at-login in particular can be revoked in System Settings behind our back.
+
+    private func settingsItem() -> NSMenuItem {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+
+        submenu.addItem(header("REFRESH EVERY"))
+        for minutes in Settings.refreshOptions {
+            let title = minutes == 1 ? "1 minute" : "\(minutes) minutes"
+            let item = action(title, key: "", selector: #selector(setInterval(_:)))
+            item.tag = minutes
+            item.state = Settings.refreshMinutes == minutes ? .on : .off
+            submenu.addItem(item)
+        }
+
+        submenu.addItem(.separator())
+        submenu.addItem(header("NOTIFY ABOVE"))
+        for threshold in Settings.thresholdOptions {
+            let item = action(threshold == 0 ? "Off" : "\(threshold)%",
+                              key: "", selector: #selector(setThreshold(_:)))
+            item.tag = threshold
+            item.state = Settings.notifyThreshold == threshold ? .on : .off
+            submenu.addItem(item)
+        }
+
+        submenu.addItem(.separator())
+        let launch = action("Launch at Login", key: "", selector: #selector(toggleLaunchAtLogin))
+        launch.state = Settings.launchAtLogin ? .on : .off
+        submenu.addItem(launch)
+
+        let item = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        item.isEnabled = true
+        item.submenu = submenu
+        return item
+    }
+
+    @objc private func setInterval(_ sender: NSMenuItem) {
+        Settings.refreshMinutes = sender.tag
+        onSettingsChanged?()
+    }
+
+    @objc private func setThreshold(_ sender: NSMenuItem) {
+        Settings.notifyThreshold = sender.tag
+        onSettingsChanged?()
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        Settings.launchAtLogin.toggle()
     }
 
     private func countdownRow(for window: LimitWindow) -> NSMenuItem {
