@@ -11,7 +11,9 @@ jobs:
   release:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      # Pinned to a commit rather than a tag — see the note in build.yml. It matters more here,
+      # where the token can write.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # `VERSION` in build.sh is what lands in CFBundleVersion / CFBundleShortVersionString, and
       # nothing ties it to the tag. Tagging v0.2.0 on a commit where build.sh still says 0.1.0

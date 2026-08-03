@@ -1,0 +1,12 @@
+# A vulnerability filed as a public issue is disclosed the moment it is filed, so the chooser points
+# at the private route instead of leaving people to find it. Blank issues stay off: both templates
+# ask for the version and the macOS release, and without them a report about an undocumented endpoint
+# is usually unactionable.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/vickipetrova/headroom/security/advisories/new
+    about: Privately, through GitHub — never as a public issue, and never with your token in it.
+  - name: Read the security model first
+    url: https://github.com/vickipetrova/headroom/blob/main/SECURITY.md
+    about: What Headroom reads, where it sends it, and what it stores. Often answers the question.
