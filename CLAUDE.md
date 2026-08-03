@@ -161,6 +161,22 @@ edge anchored, and landing on exactly the width a from-scratch rebuild produces.
 pad widths. The real limit is *row count*: in-place updates can't add or remove rows, so a window
 appearing or disappearing waits for the next open. The menu bar title stays correct meanwhile.
 
+**Height re-lays-out too, but only if the row's frame is changed — AppKit will not work it out.** A
+view-backed item is sized by hand once and never again; the width is autoresized to the menu, the
+height is not touched. So `HostedRow.update` re-measures on every content swap, and the open menu
+follows: a held-open menu was measured going 329 → 314 points tall as the error message dropped from
+three lines to two, in step with the row's own 55 → 40. What AppKit will *not* do is notice that the
+content inside the host got taller. Left to itself, a row born around "Loading…" clips a later
+multi-line error to one line.
+
+The measuring API matters, and the obvious one is wrong. `fittingSize` does not do height-for-width:
+for the Keychain-denied message it returns 25pt — one line — whether the row is 200pt or 300pt wide,
+and it still returns 25pt with the view in a window after `layoutSubtreeIfNeeded()`, and
+`sizingOptions = [.intrinsicContentSize]` reports the same. `NSHostingController.sizeThatFits(in:)`
+returns 85pt at 300pt wide and 115pt at 200pt — narrower is taller, which is the proof it is actually
+resolving the wrap. That is why the row hosts through a controller rather than a bare
+`NSHostingView`.
+
 One trap when checking this by hand: querying menu item names over `osascript` on a **closed** menu
 triggers `menuNeedsUpdate` and therefore a rebuild, so it reports fresh text whether or not in-place
 refresh works. It only proves something about live updates when paired with evidence the menu is

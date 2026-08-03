@@ -138,7 +138,7 @@ struct PanelTextView: View {
 }
 
 enum PanelMetrics {
-    /// A floor, not a target — see `NSMenuItem.hosting`. Only wide enough that a menu showing
+    /// A floor, not a target — see `HostedRow`. Only wide enough that a menu showing
     /// nothing but "Loading…" isn't a sliver; the usage rows are all wider than this on their own,
     /// so in practice the menu sizes to its content.
     ///
@@ -164,31 +164,80 @@ enum PanelMetrics {
 
 // MARK: - Hosting
 
-extension NSMenuItem {
-    /// Wraps a SwiftUI view in a menu item sized to fit.
-    ///
-    /// `title` is set even though a view-backed item never draws it: it is what the accessibility
-    /// API and AppleScript report, which keeps `get name of every menu item` — this project's
-    /// standing way to verify the menu, documented in CLAUDE.md — working.
-    static func hosting<Content: View>(_ view: Content, title: String) -> (NSMenuItem, NSHostingView<Content>) {
-        let hosting = NSHostingView(rootView: view)
-        // Without an explicit size the item can lay out at zero height on first display.
-        hosting.frame.size = hosting.fittingSize
+/// A view-backed menu row that keeps its own height honest.
+///
+/// `NSMenuItem.view` is sized by hand once and never again: AppKit stretches the width to whatever
+/// the menu settled on, but it never touches the height. That is fine for a row whose content never
+/// changes, and wrong for every row here — `MenuController` refreshes rows in place by handing the
+/// host a new `rootView`, so a row born around "Loading…" kept the one line it was born with and
+/// clipped the multi-line Keychain-denied message to a sliver.
+///
+/// Swapping content and re-measuring therefore live in one method, `update`, rather than being two
+/// things a caller has to remember to do in order.
+final class HostedRow<Content: View> {
+    let item = NSMenuItem()
+
+    /// An `NSHostingController`, not the bare `NSHostingView` this used to be, for one reason:
+    /// `sizeThatFits(in:)` is the only API here that does height-for-width. `fittingSize` does not,
+    /// and measurably so — for the Keychain message it returns 25pt (one line) whether the row is
+    /// 200pt or 300pt wide, and it still returns 25pt with the view installed in a window and
+    /// `layoutSubtreeIfNeeded()` called. `sizingOptions = [.intrinsicContentSize]` reports the same
+    /// 25pt. `sizeThatFits(in:)` returns 85pt at 300pt wide and 115pt at 200pt, which is the
+    /// narrower-is-taller behaviour that proves it is actually resolving the wrap.
+    private let controller: NSHostingController<Content>
+
+    private var view: NSView { controller.view }
+
+    init(_ rootView: Content, title: String) {
+        controller = NSHostingController(rootView: rootView)
+        // Width still comes from `fittingSize`: it is what the menu measures its own width from, and
+        // it is correct for width — it is only height-for-width that it cannot do. Changing this to
+        // a proposed width would change how wide the menu sits, which is a separate, tuned decision.
+        view.frame.size = view.fittingSize
         // AppKit sizes the menu from the widest item and then adds its own chrome — measured at 65pt
         // beyond a 300pt row — but it lays the view out at x=0 and does not stretch it. Left alone,
         // every one of those points became dead space on the right, so the separators visibly ran
         // past the end of the text. Autoresizing lets the row grow into the width the menu actually
         // chose; the SwiftUI frame's `minWidth` is what the menu measured in the first place.
-        hosting.autoresizingMask = [.width]
-        let item = NSMenuItem()
+        view.autoresizingMask = [.width]
+        // Not only for later swaps: a row *created* with the long message was clipped too, because
+        // the height `fittingSize` just wrote is the one-line one.
+        fitHeight()
+        // `title` is set even though a view-backed item never draws it: it is what the accessibility
+        // API and AppleScript report, which keeps `get name of every menu item` — this project's
+        // standing way to verify the menu, documented in CLAUDE.md — working.
         item.title = title
-        item.view = hosting
+        item.view = view
         // These rows are data, not commands. Left enabled — the default, since the menu sets
         // `autoenablesItems = false` — releasing the mouse over one selects it and dismisses the
         // whole menu, arrow-key navigation stops on rows that draw no highlight, and VoiceOver
         // offers them as actionable. Disabling costs nothing here: it dims an item's *own* drawing,
         // and this item draws none.
         item.isEnabled = false
-        return (item, hosting)
+    }
+
+    /// Replace the content and re-measure, in that order.
+    ///
+    /// Called from `MenuController`'s live rows, which is to say while the menu may be open.
+    func update(_ rootView: Content, title: String) {
+        controller.rootView = rootView
+        item.title = title
+        fitHeight()
+    }
+
+    /// Grow or shrink to the height this content needs *at the width the menu actually gave the row*.
+    ///
+    /// Measuring at the natural width instead would be wrong in the direction that hurts: these rows
+    /// are stretched wider than they ask for, and a wider row wraps to fewer lines, so the natural
+    /// width over-reports and would leave a band of dead space under the text.
+    func fitHeight() {
+        // Before the menu has laid the row out there is no given width yet; its own measured width is
+        // the best proposal available, and it is what the menu is about to be at least as wide as.
+        let width = view.frame.width > 0 ? view.frame.width : PanelMetrics.minimumWidth
+        let fitted = controller.sizeThatFits(
+            in: NSSize(width: width, height: .greatestFiniteMagnitude))
+        // Guarded so an unchanged row doesn't dirty its frame on every 60-second tick.
+        guard abs(view.frame.height - fitted.height) > 0.5 else { return }
+        view.frame.size.height = fitted.height
     }
 }

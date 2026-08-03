@@ -339,26 +339,30 @@ final class MenuController: NSObject, NSMenuDelegate {
     private func usageRow(for window: LimitWindow) -> NSMenuItem {
         let id = window.id
         let row = UsageRow(window, mode: Settings.colorMode)
-        let (item, hosting) = NSMenuItem.hosting(UsageRowView(row: row), title: row.spoken)
+        let hosted = HostedRow(UsageRowView(row: row), title: row.spoken)
         liveRows.append(LiveRow { [weak self] in
             guard let self, let window = self.window(id: id) else { return }
             let row = UsageRow(window, mode: Settings.colorMode)
-            hosting.rootView = UsageRowView(row: row)
-            item.title = row.spoken
+            // `update` re-measures. A usage row is a constant three lines today, so this costs a
+            // measurement that always agrees — but it is the same bug the message rows had, waiting
+            // for the first heading that wraps or the first row that grows a line.
+            hosted.update(UsageRowView(row: row), title: row.spoken)
         })
-        return item
+        return hosted.item
     }
 
     /// A message-only row: the footer, an error, "Loading…".
     private func textRow(_ text: @escaping () -> String?) -> NSMenuItem {
         let initial = text() ?? ""
-        let (item, hosting) = NSMenuItem.hosting(PanelTextView(text: initial), title: initial)
+        let hosted = HostedRow(PanelTextView(text: initial), title: initial)
         liveRows.append(LiveRow {
             guard let latest = text() else { return }
-            hosting.rootView = PanelTextView(text: latest)
-            item.title = latest
+            // The row this fix exists for. "Loading…" becoming the three-line Keychain message is a
+            // height change, and until `update` re-measured, the row kept its one-line height and
+            // clipped the rest away.
+            hosted.update(PanelTextView(text: latest), title: latest)
         })
-        return item
+        return hosted.item
     }
 
     /// Errors only. How fresh the numbers are is shown on the Refresh Now row instead, where it sits
