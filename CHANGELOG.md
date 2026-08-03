@@ -4,6 +4,17 @@ All notable changes to Headroom are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Message rows no longer clip when their text changes.** A view-backed row was measured once, when
+  it was created, so a row built around a short string — "Loading…", or a one-line network error —
+  kept that height when a longer message replaced it, and the multi-line Keychain-permission message
+  was cut off at one line. Rows created *with* a long message were clipped the same way. Heights are
+  now re-measured whenever the content changes, at the width the menu actually gave the row, and the
+  open menu grows and shrinks to match.
+
 ## [0.1.0] - 2026-08-02
 
 First release.

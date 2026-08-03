@@ -94,6 +94,97 @@ import Testing
     }
 }
 
+/// A view-backed row has to re-measure when its content changes, and `HostedRow` is the only piece
+/// of the menu that can be built in a test — it makes no status item and touches no window server.
+///
+/// Everything here is a *height* assertion at a fixed width. Absolute values are deliberately not
+/// asserted: they move with the system font and the macOS version. What must hold is the relation —
+/// a longer string at the same width needs more height, and the row has to actually take it.
+///
+/// `@MainActor` is load-bearing, not decoration. swift-testing runs suites concurrently, and the
+/// first run of this one aborted every test with *"modifying the autolayout engine from a background
+/// thread"* — building an `NSHostingController` reaches AppKit's layout engine, which is main-thread
+/// only. The failure is a crash, not a test failure, so it takes the whole run down with it.
+@Suite @MainActor struct HostedRowTests {
+    /// The width the menu settles at, so the wrap matches what ships.
+    private let width = PanelMetrics.textWrapWidth + PanelMetrics.horizontalPadding * 2
+
+    private let oneLine = "Loading…"
+
+    /// The real Keychain-denied copy, which is the string that exposed this.
+    private let manyLines = """
+        Keychain access was denied. Headroom needs permission to read the token Claude Code stored, \
+        and macOS only asks once. Open Keychain Access, find "Claude Code-credentials", and allow it.
+        """
+
+    private func row(_ text: String) -> HostedRow<PanelTextView> {
+        let hosted = HostedRow(PanelTextView(text: text), title: text)
+        hosted.item.view?.frame.size.width = width
+        hosted.fitHeight()
+        return hosted
+    }
+
+    private func height(of hosted: HostedRow<PanelTextView>) -> CGFloat {
+        hosted.item.view?.frame.height ?? 0
+    }
+
+    /// The bug: a row built around a short string, then handed a long one, kept its original height
+    /// and clipped the rest away. Asserted against a row *built* with the long string rather than a
+    /// hardcoded number, so this keeps meaning the same thing when the font or the copy changes.
+    @Test func swappingInLongerTextGrowsTheRow() {
+        let short = row(oneLine)
+        let wanted = height(of: row(manyLines))
+
+        #expect(wanted > height(of: short))  // guard: the two strings must differ in height at all
+
+        short.update(PanelTextView(text: manyLines), title: manyLines)
+        #expect(height(of: short) >= wanted)
+    }
+
+    /// And back down, or a row that once showed an error keeps a band of dead space under one line
+    /// of "Loading…" forever.
+    @Test func swappingBackToShorterTextShrinksIt() {
+        let hosted = row(manyLines)
+        let tall = height(of: hosted)
+        hosted.update(PanelTextView(text: oneLine), title: oneLine)
+        #expect(height(of: hosted) < tall)
+    }
+
+    /// `fittingSize` — what this used to size with — reports one line for the long string no matter
+    /// how wide the row is, so a row *created* with the error was clipped before any swap happened.
+    ///
+    /// Deliberately does not go through `row(_:)`: that helper calls `fitHeight()` itself, which
+    /// masks whether the initializer ever measured. Mutation-testing caught exactly that — deleting
+    /// the `fitHeight()` call from `init` left the first version of this test passing.
+    @Test func aRowCreatedWithLongTextIsNotBornClipped() {
+        let short = HostedRow(PanelTextView(text: oneLine), title: oneLine)
+        let long = HostedRow(PanelTextView(text: manyLines), title: manyLines)
+        #expect((long.item.view?.frame.height ?? 0) > (short.item.view?.frame.height ?? 0))
+    }
+
+    /// Height must be measured at the width the menu gave the row, not at the row's natural width.
+    /// Narrower wraps to more lines, so if this came back equal the measurement is ignoring width.
+    @Test func heightIsMeasuredAtTheGivenWidth() {
+        let narrow = HostedRow(PanelTextView(text: manyLines), title: manyLines)
+        narrow.item.view?.frame.size.width = PanelMetrics.minimumWidth
+        narrow.fitHeight()
+
+        #expect(height(of: narrow) > height(of: row(manyLines)))
+    }
+
+    /// The usage rows go through the same path. Their height is constant today, so this asserts the
+    /// path is wired rather than that anything grows — the point is that it can't silently stop being.
+    @Test func usageRowsAreMeasuredToo() {
+        let window = LimitWindow(kind: .session, id: "session", label: "SESSION · 5-HOUR",
+                                 shortLabel: "Session", optionLabel: "opt", utilization: 42,
+                                 resetsAt: Date(timeIntervalSince1970: 1_785_600_000))
+        let view = UsageRowView(row: UsageRow(window, now: Date(timeIntervalSince1970: 1_785_500_000),
+                                              mode: .alertsOnly))
+        let hosted = HostedRow(view, title: "row")
+        #expect(hosted.item.view?.frame.height ?? 0 > 0)
+    }
+}
+
 /// Which limits the menu bar title renders. Separate suite because these are the rules that are
 /// awkward to reach by hand — a scope vanishing from the response, or all of them vanishing at once.
 @Suite struct TitleSelectionTests {
